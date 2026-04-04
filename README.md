@@ -94,7 +94,12 @@ make research  # CLI one-shot
 make clean     # remove build artifacts
 ```
 
-On first run, Planex will ask for your OpenAI API key and create `~/.planex/`.
+**Important:** `make install` runs an interactive onboarding that collects your OpenAI API key and creates `~/.planex/.env`. This must run before launching the desktop app or Docker. Alternatively, create it manually:
+
+```bash
+mkdir -p ~/.planex
+echo "OPENAI_API_KEY=sk-your-key-here" > ~/.planex/.env
+```
 
 ## Architecture
 
