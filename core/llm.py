@@ -18,6 +18,19 @@ from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
 
+# Auto-instrument OpenAI via Traceloop/OpenLLMetry
+# Sends traces to local OTEL collector if configured, otherwise console, otherwise silent
+try:
+    from traceloop.sdk import Traceloop
+    Traceloop.init(
+        disable_batch=True,
+        api_key=os.getenv("TRACELOOP_API_KEY", "no-op"),
+        api_endpoint=os.getenv("TRACELOOP_API_ENDPOINT", ""),
+        exporter=None if os.getenv("TRACELOOP_API_KEY") else "none",
+    )
+except Exception:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Data types
