@@ -68,25 +68,30 @@ The agent decides on each turn whether to search the web, query the knowledge ba
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+, Node.js 18+, OpenAI API key
-
-### Install & Run
+### Docker (any OS — recommended)
 
 ```bash
 git clone https://github.com/Amineelfarssi/planex.git
 cd planex
-make install   # installs everything (Python + Node)
-make run       # launches desktop app
+echo "OPENAI_API_KEY=sk-..." > .env
+docker compose up
+# Open http://localhost:8000
 ```
 
-Other run modes:
+### Native Install (macOS / Linux)
 
 ```bash
+make install   # Python venv + npm deps
+make run       # desktop app (macOS native window)
 make dev       # web app (backend :8000 + frontend :3000)
+```
+
+Other commands:
+
+```bash
 make serve     # backend only
-make research  # CLI one-shot (prompts for goal)
+make research  # CLI one-shot
+make clean     # remove build artifacts
 ```
 
 On first run, Planex will ask for your OpenAI API key and create `~/.planex/`.

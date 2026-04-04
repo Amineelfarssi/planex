@@ -33,7 +33,10 @@ def on_navigation(url: str) -> bool:
 
 
 def _set_dock_icon():
-    """Set macOS dock icon before webview starts."""
+    """Set macOS dock icon. No-op on other platforms."""
+    import platform
+    if platform.system() != "Darwin":
+        return
     try:
         from AppKit import NSApplication, NSImage
         icon_path = str(Path(__file__).parent / "assets" / "icon.png")

@@ -1,0 +1,15 @@
+services:
+  planex:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PLANEX_FAST_MODEL=${PLANEX_FAST_MODEL:-gpt-5-nano-2025-08-07}
+      - PLANEX_SMART_MODEL=${PLANEX_SMART_MODEL:-gpt-5-mini}
+      - PLANEX_STRATEGIC_MODEL=${PLANEX_STRATEGIC_MODEL:-gpt-5.1}
+    volumes:
+      - planex-data:/root/.planex
+
+volumes:
+  planex-data:
