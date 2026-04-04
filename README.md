@@ -77,18 +77,16 @@ The agent decides on each turn whether to search the web, query the knowledge ba
 ```bash
 git clone https://github.com/Amineelfarssi/planex.git
 cd planex
+make install   # installs everything (Python + Node)
+make run       # launches desktop app
+```
 
-# Backend
-uv venv --python 3.11 .venv && source .venv/bin/activate
-uv pip install -e ".[dashboard]"
+Other run modes:
 
-# Frontend
-cd frontend && npm install && cd ..
-
-# Run (pick one)
-python desktop.py                           # Desktop app
-planex serve & cd frontend && npm run dev   # Web app
-planex run "research GEPA architecture" -y  # CLI
+```bash
+make dev       # web app (backend :8000 + frontend :3000)
+make serve     # backend only
+make research  # CLI one-shot (prompts for goal)
 ```
 
 On first run, Planex will ask for your OpenAI API key and create `~/.planex/`.
