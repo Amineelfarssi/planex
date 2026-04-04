@@ -36,3 +36,4 @@ build/
 # Build artifacts
 *.so
 *.dylib
+Planex.app/
