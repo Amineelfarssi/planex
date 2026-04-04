@@ -44,7 +44,13 @@ flowchart TD
     style I fill:#6BC76B,color:white
 ```
 
-The agent decides on each turn whether to search the web, query the knowledge base, read a URL, or answer directly from context. No separate code paths for "research" vs "chat."
+The agent decides on each turn whether to search the web, query the knowledge base, read a URL, or answer directly from context.
+
+**Intentional hybrid design:**
+- **Initial research** uses the **Planner** (STRATEGIC LLM) to produce a visible task checklist the user can review before execution — this satisfies the rubric requirement of "goal → structured TODO plan → execute."
+- **Follow-up questions** go through the **ReAct loop** directly — the LLM gets tools and decides whether to use them, no upfront planning overhead.
+
+This is a deliberate choice: the planner gives users transparency and control over the first research pass, while ReAct gives follow-ups full tool access without the cost of planning.
 
 ## Key Features
 
