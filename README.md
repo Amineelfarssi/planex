@@ -1,286 +1,244 @@
-# Planex — AI Research Assistant with Persistent Knowledge Base
+<p align="center">
+  <img src="assets/icon.svg" alt="Planex" width="80" />
+</p>
+
+<h1 align="center">Planex</h1>
+
+<p align="center">
+  <em>AI Research Assistant with Persistent Knowledge Base</em>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python" />
+  <img src="https://img.shields.io/badge/openai-gpt--5-green" alt="OpenAI" />
+  <img src="https://img.shields.io/badge/protocol-AG--UI-orange" alt="AG-UI" />
+  <img src="https://img.shields.io/badge/vector_db-LanceDB-purple" alt="LanceDB" />
+  <img src="https://img.shields.io/badge/framework-none-lightgrey" alt="No Framework" />
+</p>
+
+---
 
 An autonomous AI agent that breaks complex research goals into plans, executes them using real tools, and builds a persistent knowledge base that grows smarter over time.
 
-**Built for:** Wolters Kluwer AI Engineering Take-Home
-**No agent frameworks** (LangChain, CrewAI, etc.) — custom Python with asyncio, as required.
+**No agent frameworks** (LangChain, CrewAI, etc.) — custom Python with asyncio, structured output via Pydantic, and the [AG-UI protocol](https://github.com/ag-ui-protocol/ag-ui) for event streaming.
 
----
+## How It Works
 
-## What Makes Planex Different
+Every user message — whether a new research goal or a follow-up question — goes through the same **unified ReAct loop**:
 
-| vs. Plain ChatGPT | Planex |
-|-------------------|--------|
-| Stateless | Persistent knowledge base + memory across sessions |
-| No document ingestion | Upload files, paste URLs, paste text |
-| Manual tool use | Autonomous plan → execute → learn loop |
-| No source attribution | Every finding traced to source |
+```mermaid
+flowchart TD
+    A[User Message] --> B[Query Rewriter]
+    B -->|Resolves pronouns<br/>using session context| C[ReAct Loop]
+    C --> D{LLM Decision}
+    D -->|Needs info| E[Tool Call]
+    E --> F[web_search / read_url /<br/>knowledge_search / local_search]
+    F -->|Result| C
+    D -->|Can answer| G[Stream Response]
+    G -->|AG-UI Events| H[Frontend]
+    G -->|Auto-ingest| I[Knowledge Base]
+    G -->|Save| J[Session + Memory]
 
-| vs. GPT-Researcher | Planex |
-|---------------------|--------|
-| Stateless report generator | Research companion with growing KB |
-| Web-only | Local docs + web, cross-referenced |
-| One-shot | Follow-up questions with full context |
+    style A fill:#DA7756,color:white
+    style C fill:#5B9BD5,color:white
+    style I fill:#6BC76B,color:white
+```
 
----
+The agent decides on each turn whether to search the web, query the knowledge base, read a URL, or answer directly from context. No separate code paths for "research" vs "chat."
+
+## Key Features
+
+1. **Unified ReAct Loop** — one path for everything. The LLM gets tools and decides whether to use them. Can chain multiple tool calls (search → read → search again) within a single turn.
+
+2. **AG-UI Event Streaming** — every tool call, result, and text chunk is emitted as a typed [AG-UI event](https://github.com/ag-ui-protocol/ag-ui) via SSE. The frontend renders tool activity in real-time.
+
+3. **Three-Tier LLM Strategy** — cheap model for summaries (FAST), capable model for tool dispatch (SMART), reasoning model for planning (STRATEGIC). Each tier independently configurable.
+
+4. **Structured Output Everywhere** — all LLM calls returning structured data use Pydantic models with OpenAI's native `client.beta.chat.completions.parse()`. Zero parsing failures.
+
+5. **Persistent Knowledge Base** — LanceDB vector store that grows silently. Session syntheses auto-ingest. Users can upload files, paste URLs, or drop documents. Every chunk carries structured metadata (`KBChunkMetadata`).
+
+6. **Session-Aware Follow-ups** — query rewriter resolves "them", "it", "this" using the session's research context before the LLM sees the message. Follow-ups have full tool access.
+
+7. **Three-Layer Memory** — short-term (conversation), long-term (`MEMORY.md` with extracted learnings), and knowledge (LanceDB). Memory flush before context compaction prevents amnesia.
+
+8. **Rich Artifacts** — the frontend renders `mermaid` diagrams, `chart` visualizations, `cards` dashboards, and `choices` interactive disambiguation cards directly from markdown code blocks.
+
+9. **Desktop + Web + CLI** — native macOS app (pywebview), web app (React + FastAPI), and CLI for scripting. Same backend, same agent.
 
 ## Quick Start
 
 ### Prerequisites
-- Python 3.11+
-- OpenAI API key
-- Node.js 18+ (for frontend)
 
-### Install
+- Python 3.11+, Node.js 18+, OpenAI API key
+
+### Install & Run
 
 ```bash
+git clone https://github.com/Amineelfarssi/planex.git
 cd planex
 
-# Python backend
-uv venv --python 3.11 .venv
-source .venv/bin/activate
-uv pip install -e ".[dashboard,dev]"
+# Backend
+uv venv --python 3.11 .venv && source .venv/bin/activate
+uv pip install -e ".[dashboard]"
 
 # Frontend
 cd frontend && npm install && cd ..
 
-# Configure
-cp .env.example .env
-# Edit .env with your OpenAI key
-# Or run `planex` for interactive onboarding
+# Run (pick one)
+python desktop.py                           # Desktop app
+planex serve & cd frontend && npm run dev   # Web app
+planex run "research GEPA architecture" -y  # CLI
 ```
 
-### Run
-
-```bash
-# Desktop app (recommended — single command)
-python desktop.py
-
-# Web app (two terminals)
-planex serve                    # Terminal 1: FastAPI on :8000
-cd frontend && npm run dev      # Terminal 2: Vite on :3000
-
-# CLI one-shot
-planex run "research quantum computing" -y
-planex ingest ./docs/
-planex status
-```
-
----
+On first run, Planex will ask for your OpenAI API key and create `~/.planex/`.
 
 ## Architecture
 
-### Unified ReAct Loop with AG-UI Events
+### Three-Tier LLM
 
-Every user message — whether first research or follow-up — goes through the same loop:
+| Tier | Model | Reasoning | Purpose |
+|------|-------|-----------|---------|
+| FAST | gpt-5-nano | auto | Rewriting, routing, summaries, metadata extraction |
+| SMART | gpt-5-mini | auto | Tool dispatch, synthesis, follow-up responses |
+| STRATEGIC | gpt-5.1 | `high` | Planning and decomposition |
 
+> **Note:** `gpt-5.1` defaults to `reasoning_effort: none`. We explicitly set `high` — without this, planning quality drops significantly.
+
+### Structured Output Models
+
+All LLM calls returning structured data use Pydantic models defined in [`core/models.py`](core/models.py):
+
+```python
+class ResearchPlan(BaseModel):
+    plan_title: str
+    tasks: list[PlanTask]
+
+class RewrittenQuery(BaseModel):
+    query: str
+    changed: bool
+
+class KBChunkMetadata(BaseModel):
+    source: str
+    source_type: str  # local_file | web_page | session_synthesis
+    doc_title: str
+    ingested_by: str  # user_upload | session:<plan_id>
+    tags: list[str]
+    file_hash: str    # SHA-256 for dedup
+    # ... 12 fields total
 ```
-User message
-    │
-    ▼
-Query Rewriter (FAST LLM, structured output)
-  → resolves "them", "it", "this" using session context
-    │
-    ▼
-ReAct Loop (SMART LLM + tools):
-  1. LLM sees: context + tools → decides action
-  2. If tool_call → execute tool → feed result → loop
-  3. If text → stream response → done
-  4. AG-UI events emitted throughout (SSE)
-    │
-    ▼
-Response streamed to frontend
-  + saved to session + auto-ingested into KB
-```
-
-**AG-UI events** ([ag-ui-protocol](https://github.com/ag-ui-protocol/ag-ui)):
-- `RUN_STARTED/FINISHED` — lifecycle
-- `STEP_STARTED/FINISHED` — rewriting, thinking
-- `TOOL_CALL_START/ARGS/END/RESULT` — tool execution with arguments and results
-- `TEXT_MESSAGE_START/CONTENT/END` — streaming response
-- `STATE_SNAPSHOT` — final status
-
-### Three-Tier LLM Strategy
-
-| Tier | Default Model | Reasoning | Used for |
-|------|---------------|-----------|----------|
-| FAST | gpt-5-nano | medium (auto) | Summaries, rewriting, routing, metadata extraction |
-| SMART | gpt-5-mini | medium (auto) | Tool dispatch, synthesis, follow-up chat |
-| STRATEGIC | gpt-5.1 | **high** (explicit) | Planning, decomposition |
-
-All LLM calls returning structured data use **Pydantic models** with `client.beta.chat.completions.parse()` — zero parsing failures.
-
-### Structured Output Models (`core/models.py`)
-
-| Model | Purpose |
-|-------|---------|
-| `IntentClassification` | Route messages (chat/research/kb_query) |
-| `RewrittenQuery` | Resolve pronouns using session context |
-| `ResearchPlan` / `PlanTask` | Plan decomposition |
-| `DocumentMetadata` | Extracted from ingested docs |
-| `MemoryExtraction` | Key learnings from sessions |
-| `KBChunkMetadata` | Structured metadata for every KB chunk |
-| `ClarificationRequest` | Disambiguation options (rendered as clickable cards) |
-| `QueryVariants` | RAG Fusion multi-query generation |
 
 ### Tools
 
-| Tool | Source | Notes |
-|------|--------|-------|
-| `web_search` | OpenAI Responses API | Native web search, no extra API key |
-| `read_url` | httpx + trafilatura | Fetch + extract web pages |
-| `knowledge_search` | LanceDB | Vector search over KB |
-| `local_search` | grep/ripgrep | Text search over workspace files |
+| Tool | Source | When Used |
+|------|--------|-----------|
+| `web_search` | OpenAI Responses API | Current info, no extra API key |
+| `read_url` | httpx + trafilatura | Deep-read articles from search results |
+| `knowledge_search` | LanceDB vectors | Find past research and ingested docs |
+| `local_search` | grep (ripgrep-style) | Text search over workspace files |
 | `ingest_documents` | LanceDB | Add files to KB |
-| `read_file` / `write_file` | filesystem | Local file operations |
-| `get_current_time` | datetime | Time as tool (not in system prompt — preserves caching) |
+| `read_file` / `write_file` | filesystem | Local file I/O |
+| `get_current_time` | datetime | Time as tool, not in system prompt (preserves caching) |
 
-Tools borrowed from [Claude Code](https://github.com/zackautocracy/claude-code) patterns: per-tool `prompt()` method, `is_available()` for planner awareness, auto-discovery via registry.
+### Event Flow
 
-### Knowledge Base (Invisible Tool)
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant B as Backend
+    participant L as LLM
+    participant T as Tool
 
-LanceDB embedded vector DB at `~/.planex/knowledge.lance/`. Not a UI feature — a tool the agent calls silently.
+    U->>F: "Research GEPA architecture"
+    F->>B: POST /api/turn (SSE)
+    B->>L: Rewrite query (FAST)
+    B-->>F: STEP_STARTED: rewriting
+    B->>L: ReAct turn (SMART + tools)
+    L->>B: tool_call: web_search
+    B-->>F: TOOL_CALL_START
+    B->>T: web_search("GEPA architecture")
+    T->>B: results
+    B-->>F: TOOL_CALL_RESULT
+    B->>L: ReAct turn 2 (with results)
+    L->>B: tool_call: read_url
+    B-->>F: TOOL_CALL_START
+    B->>T: read_url(url)
+    T->>B: article text
+    B-->>F: TOOL_CALL_RESULT
+    B->>L: ReAct turn 3
+    L->>B: text response
+    B-->>F: TEXT_MESSAGE_CONTENT (streaming)
+    B-->>F: RUN_FINISHED
+    B->>B: Auto-ingest synthesis into KB
+```
 
-**Grows automatically:**
-- Session syntheses auto-ingested after every research
-- User uploads (files, URLs, pasted text)
-- Web content from research
+### Context Strategy
 
-**Structured metadata** (`KBChunkMetadata`): source tracking, provenance, tags, content type, file hash for dedup.
-
-### Memory System
-
-Three layers (inspired by [OpenClaw](https://openclaw.ai)):
-- **MEMORY.md** — long-term learnings, loaded every session (~600 tokens)
-- **Session JSON** — full state per session (tasks, synthesis, chat history, logs)
-- **Daily notes** — session summaries
-
-Memory flush before context compaction prevents the #1 agent failure: forgetting earlier context.
-
----
+```mermaid
+graph LR
+    A[MEMORY.md<br/>~600 tokens<br/>always loaded] --> D[Assembled Context]
+    B[Session Synthesis<br/>~3000 tokens<br/>current research] --> D
+    C[KB Search<br/>~1000 tokens<br/>on-demand] --> D
+    E[Chat History<br/>variable<br/>compacted if long] --> D
+    D --> F[LLM Call]
+```
 
 ## Frontend
 
-React 18 + TypeScript + Vite + Tailwind CSS. Dark/light theme.
+Conversation-first layout inspired by Claude Desktop:
 
-**Layout:** Collapsible sidebar (hamburger) + main conversation + collapsible document panel.
-
-**Key components:**
-- Hero with time-aware greeting + animated orbital logo
-- Research flow: plan tasks → tool activity feed → streaming synthesis
-- Follow-up chat with full session context
-- Document panel: rendered research report with download/copy
-- Choice cards: interactive disambiguation (```choices code blocks)
-- Rich artifacts: mermaid diagrams, charts, dashboard cards
-- Sidebar: sessions list, memory peek, sources (upload/URL/paste/drop)
-- Toast notifications
-
-**Desktop app:** pywebview wraps FastAPI + built frontend in a native macOS window.
-
----
-
-## Context Strategy
-
-**Why this matters:** Context management is where most agents fail silently.
-
-1. **Unified path** — every message goes through the same ReAct loop. No separate "research" vs "chat" code paths.
-2. **Query rewriting** — resolves "them/it/this" using session synthesis before the LLM sees the message.
-3. **Session-aware** — follow-ups include the full research synthesis (3000 tokens) in context.
-4. **KB as tool** — vector search happens on-demand, not preloaded.
-5. **Memory flush** — extracts key learnings to MEMORY.md before compaction.
-6. **Structured output everywhere** — Pydantic models eliminate parsing failures.
-
----
+- **Hamburger sidebar** — sessions, memory peek, sources (upload/URL/paste/drop)
+- **Hero** — time-aware greeting with animated orbital logo
+- **Main area** — research execution + streaming follow-up chat
+- **Document panel** — collapsible right pane with downloadable research report
+- **Dark/light theme** — toggle in header
+- **Rich rendering** — mermaid, charts, cards, choice cards, copy buttons
 
 ## Evaluation Scenarios
 
-| # | Scenario | Success Criteria |
-|---|----------|-----------------|
-| 1 | **Web research**: "Research GEPA architecture" | Plan with topic-specific tasks, web search results, cited synthesis |
-| 2 | **Follow-up with tools**: Research topic, then "compare to transformers" | Query rewritten, tools called if needed, answer uses session context |
-| 3 | **Document ingestion**: Upload PDF, then ask about its content | File ingested, KB search finds it, answer cites the document |
-| 4 | **Cross-session knowledge**: Research topic A, new session asks related question | KB search finds prior research, answer builds on it |
-| 5 | **Disambiguation**: Short ambiguous query | Choice cards rendered, user clicks option, research proceeds |
-
----
-
-## Trade-offs & Decisions
-
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Agent framework | None (custom) | Assignment requirement |
-| LLM provider | OpenAI (abstracted) | Provided API key; three-tier strategy optimizes cost |
-| Web search | OpenAI native (Responses API) | Zero extra API keys needed |
-| Vector DB | LanceDB (embedded) | Zero config, pip install |
-| Structured output | Pydantic + `parse()` | Type-safe, zero parsing failures |
-| Event protocol | AG-UI | Open standard, typed events |
-| Frontend | React + Vite (custom) | No CopilotKit dependency (pulls LangChain) |
-| KB visibility | Invisible tool | Grows silently, no management overhead |
-| Reasoning | gpt-5.1 at `high` | Defaults to `none` — must be explicit |
-
-## Time Spent
-
-| Phase | Time | What |
-|-------|------|------|
-| Research & Design | ~2h | Analyzed claude-code, OpenClaw, GPT-Researcher; designed architecture |
-| Core Backend | ~3h | LLM provider, tools, knowledge store, memory, agent loop |
-| Frontend | ~3h | React app, dark/light theme, streaming, document panel |
-| Iteration & Fixes | ~3h | ReAct loop, AG-UI events, structured output, UX refinements |
-| Polish & Deliverables | ~1h | README, git, transcripts |
-
-## Future Improvements
-
-- **Full AG-UI compliance** with CopilotKit frontend (blocked by LangChain transitive dep)
-- **Streaming synthesis** during research (currently streams in follow-up only)
-- **Model picker** in the UI
-- **Source management** — view/remove KB entries
-- **Semantic search over session notes** — embed daily notes for better recall
-- **Multi-turn plan refinement** — user can modify the plan before execution
-- **Export** — PDF/DOCX output from the document panel
-
----
+| Scenario | What to Test | Success Criteria |
+|----------|-------------|-----------------|
+| Web research | "Research GEPA architecture" | Topic-specific plan, web search results, cited synthesis |
+| Follow-up with tools | After research, ask "compare to transformers" | Query rewritten, tools called if needed, uses session context |
+| Document ingestion | Upload PDF, ask about content | File ingested, KB finds it, answer cites document |
+| Cross-session knowledge | Research A, new session asks related question | KB search finds prior research |
+| Disambiguation | Short ambiguous query | Choice cards rendered, user clicks, research proceeds |
 
 ## Project Structure
 
 ```
 planex/
-├── main.py                 # CLI entry point
-├── desktop.py              # Native macOS app (pywebview)
-├── CLAUDE.md               # Claude Code guidance
 ├── core/
-│   ├── agent.py            # Main orchestrator
-│   ├── llm.py              # Three-tier LLM (chat, chat_parse, chat_stream, embed)
-│   ├── models.py           # ALL Pydantic models for structured output
 │   ├── react_loop.py       # Unified ReAct loop with AG-UI events
-│   ├── planner.py          # Goal → structured plan
-│   ├── executor.py         # Parallel task execution + synthesis
-│   ├── context.py          # Context assembly pipeline
-│   ├── knowledge.py        # LanceDB vector store (KBChunkMetadata)
-│   ├── memory.py           # MEMORY.md + daily notes + flush
-│   ├── state.py            # Session state + persistence
-│   └── onboarding.py       # First-run setup
-├── tools/
-│   ├── base.py             # Tool ABC + registry
-│   ├── web_search.py       # OpenAI native web search
-│   ├── read_url.py         # URL content extraction
-│   ├── local_search.py     # Ripgrep-style file search
-│   ├── knowledge_search.py # KB vector search
-│   ├── ingest.py           # Document ingestion
-│   ├── file_ops.py         # Read/write files
-│   └── time_tool.py        # Current date/time
-├── dashboard/
-│   └── app.py              # FastAPI: /api/turn (SSE), REST endpoints
-├── cli/
-│   └── app.py              # Rich terminal CLI
-├── frontend/
-│   ├── src/App.tsx          # Main layout (sidebar + conversation + doc panel)
-│   ├── src/api/client.ts    # REST + AG-UI SSE consumer
-│   ├── src/stores/          # Zustand state
-│   └── src/components/      # React components
-├── assets/
-│   └── icon.svg/png         # Planex orbital logo
-├── examples/
-│   └── sample_docs/         # Demo documents
-└── docs/
-    └── specs/               # Design specification
+│   ├── models.py           # ALL Pydantic models (structured output)
+│   ├── llm.py              # Three-tier LLM (chat, chat_parse, chat_stream, embed)
+│   ├── agent.py             # Orchestrator
+│   ├── planner.py           # Goal → task plan
+│   ├── executor.py          # Parallel execution + synthesis
+│   ├── knowledge.py         # LanceDB with KBChunkMetadata
+│   ├── memory.py            # MEMORY.md + daily notes + flush
+│   ├── state.py             # Session persistence
+│   └── context.py           # Context assembly pipeline
+├── tools/                   # web_search, read_url, local_search, knowledge_search, ...
+├── dashboard/app.py         # FastAPI: /api/turn (SSE), REST endpoints
+├── frontend/                # React + Vite + Tailwind + Zustand
+├── desktop.py               # Native macOS app (pywebview)
+└── cli/app.py               # Minimal CLI: serve, run, ingest, status
 ```
+
+## Trade-offs
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| No agent framework | Custom ReAct loop | Assignment requirement; cleaner to explain |
+| OpenAI web search | Responses API | Zero extra API keys — uses existing OpenAI key |
+| AG-UI protocol | `ag-ui-protocol` package | Open standard, typed events, not a framework |
+| Structured output | Pydantic + `parse()` | Type-safe, zero parsing failures |
+| KB as invisible tool | Not a UI tab | Grows silently, no management overhead |
+| gpt-5.1 reasoning | Explicit `high` | Defaults to `none` — dramatic quality difference |
+| Single ReAct path | No chat vs research split | Simpler, every message can use tools |
+
+## License
+
+MIT
