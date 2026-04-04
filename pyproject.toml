@@ -16,8 +16,6 @@ dependencies = [
     # tavily-python removed — using OpenAI native web search instead
     "python-dotenv>=1.0",
     "click>=8.1",
-    "prompt_toolkit>=3.0",
-    "textual>=1.0",
     "pyarrow>=18.0",
 ]
 
