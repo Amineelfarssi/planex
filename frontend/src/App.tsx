@@ -155,31 +155,43 @@ export default function App() {
                       onChange={(e) => { if (e.target.files) handleFileIngest(e.target.files) }} />
                   </label>
 
-                  {/* Add URL */}
-                  <div className="flex gap-1">
-                    <div className="flex-1 relative">
+                  {/* Add URLs (one per line) */}
+                  <div className="space-y-1">
+                    <div className="relative">
                       <Link className={`absolute left-2 top-1.5 w-3 h-3 ${isDark ? 'text-planex-dimmed' : 'text-gray-400'}`} />
-                      <input
-                        type="text"
+                      <textarea
                         value={urlInput}
                         onChange={e => setUrlInput(e.target.value)}
-                        onKeyDown={async e => {
-                          if (e.key === 'Enter' && urlInput.trim()) {
-                            setIngesting(true)
-                            try {
-                              const r = await ingestUrl(urlInput)
-                              showToast(`Ingested URL (${r.chunks_created} chunks)`, 'success')
-                              setUrlInput('')
-                            } catch { showToast('Failed to fetch URL', 'error') }
-                            setIngesting(false)
-                            fetchKBStats().then(setKBStats).catch(() => {})
-                          }
-                        }}
-                        placeholder="Paste URL..."
-                        className={`w-full pl-6 pr-2 py-1 rounded text-[11px] ${isDark ? 'bg-planex-surface border-planex-border text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-700'} border focus:outline-none focus:border-planex-cyan`}
+                        placeholder="Paste URLs (one per line)..."
+                        rows={2}
+                        className={`w-full pl-6 pr-2 py-1 rounded text-[11px] resize-y ${isDark ? 'bg-planex-surface border-planex-border text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-700'} border focus:outline-none focus:border-planex-cyan`}
                         disabled={ingesting}
                       />
                     </div>
+                    {urlInput.trim() && (
+                      <button
+                        onClick={async () => {
+                          const urls = urlInput.split('\n').map(u => u.trim()).filter(u => u && u.startsWith('http'))
+                          if (!urls.length) { showToast('No valid URLs found', 'error'); return }
+                          setIngesting(true)
+                          let total = 0
+                          for (const url of urls) {
+                            try {
+                              const r = await ingestUrl(url)
+                              total += r.chunks_created
+                              showToast(`${url.slice(0, 40)}... (${r.chunks_created} chunks)`, 'success')
+                            } catch { showToast(`Failed: ${url.slice(0, 40)}...`, 'error') }
+                          }
+                          setUrlInput('')
+                          setIngesting(false)
+                          fetchKBStats().then(setKBStats).catch(() => {})
+                        }}
+                        disabled={ingesting}
+                        className="px-3 py-1 text-[10px] bg-planex-cyan/20 text-planex-cyan rounded hover:bg-planex-cyan/30 disabled:opacity-40"
+                      >
+                        {ingesting ? 'Ingesting...' : `Ingest ${urlInput.split('\n').filter(u => u.trim().startsWith('http')).length} URL(s)`}
+                      </button>
+                    )}
                   </div>
 
                   {/* Paste text toggle */}
