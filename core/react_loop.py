@@ -160,20 +160,17 @@ async def run_turn(
                     "role": "tool",
                 })
 
-                # Add tool result to messages for next LLM turn
+                # Add tool call + result in Responses API format
                 messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tool_call_id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                    }],
+                    "type": "function_call",
+                    "call_id": tool_call_id,
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments),
                 })
                 messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": tool_output,
+                    "type": "function_call_output",
+                    "call_id": tool_call_id,
+                    "output": tool_output,
                 })
 
             # Continue loop — LLM will see tool results and decide next action

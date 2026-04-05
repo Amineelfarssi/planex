@@ -25,7 +25,8 @@ class TestToolRegistry:
         assert tool is not None
         assert tool.name == "web_search"
 
-    def test_get_tools_schema_valid_openai_format(self):
+    def test_get_tools_schema_responses_api_format(self):
+        """Verify tool schemas match Responses API format (flat, with strict)."""
         registry = ToolRegistry()
         registry.auto_discover()
         schemas = registry.get_tools_schema()
@@ -33,12 +34,11 @@ class TestToolRegistry:
         assert len(schemas) > 0
         for schema in schemas:
             assert schema["type"] == "function"
-            assert "function" in schema
-            func = schema["function"]
-            assert "name" in func
-            assert "description" in func
-            assert "parameters" in func
-            assert func["parameters"]["type"] == "object"
+            assert "name" in schema, "Responses API: name is top-level, not nested"
+            assert "description" in schema
+            assert "parameters" in schema
+            assert schema["parameters"]["type"] == "object"
+            assert schema.get("strict") is True, "Responses API: strict should be True"
 
     def test_get_nonexistent_tool(self):
         registry = ToolRegistry()

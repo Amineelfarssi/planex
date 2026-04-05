@@ -1,9 +1,14 @@
-"""Three-tier LLM provider abstraction.
+"""Three-tier LLM provider — fully on the Responses API.
 
 Tiers:
-  - FAST:      parsing, extraction, chunk summaries (default: gpt-4o-mini)
-  - SMART:     tool dispatch, synthesis, report generation (default: gpt-4o)
-  - STRATEGIC: planning, query decomposition, re-ranking (default: gpt-4o)
+  - FAST:      parsing, extraction, chunk summaries
+  - SMART:     tool dispatch, synthesis, follow-up chat
+  - STRATEGIC: planning, query decomposition (reasoning=high)
+
+Uses:
+  - client.responses.create()  for chat + tool calling
+  - client.responses.parse()   for structured output (Pydantic)
+  - client.responses.create(stream=True) for streaming
 """
 
 from __future__ import annotations
@@ -11,15 +16,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
 
-# Auto-instrument OpenAI via Traceloop/OpenLLMetry
-# Sends traces to local OTEL collector if configured, otherwise console, otherwise silent
+# Auto-instrument via Traceloop/OpenLLMetry (silent no-op if not configured)
 try:
     from traceloop.sdk import Traceloop
     Traceloop.init(
@@ -92,16 +95,14 @@ class LLMProvider(ABC):
         messages: list[dict],
         response_model: type,
         tier: Tier = "smart",
-    ) -> Any:
-        """Parse response into a Pydantic model using structured output."""
-        ...
+    ) -> Any: ...
 
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 # ---------------------------------------------------------------------------
-# OpenAI implementation
+# OpenAI Responses API implementation
 # ---------------------------------------------------------------------------
 
 _TIER_ENV = {
@@ -111,20 +112,20 @@ _TIER_ENV = {
 }
 
 _TIER_DEFAULT = {
-    "fast": "gpt-5-nano-2025-08-07",  # cheapest, good for parsing/summaries
-    "smart": "gpt-5-mini",            # balanced quality for tool dispatch + synthesis
-    "strategic": "gpt-5.1",           # best available for planning + decomposition
+    "fast": "gpt-5-nano-2025-08-07",
+    "smart": "gpt-5-mini",
+    "strategic": "gpt-5.1",
 }
 
-# Reasoning effort per tier (gpt-5.1 defaults to "none" so we MUST set it)
+# gpt-5.1 defaults to reasoning_effort: none — must be explicit
 _TIER_REASONING = {
-    "fast": None,        # gpt-5-nano: let model decide (defaults to medium)
-    "smart": None,       # gpt-5-mini: let model decide (defaults to medium)
-    "strategic": "high", # gpt-5.1: defaults to NONE — must explicitly enable
+    "fast": None,
+    "smart": None,
+    "strategic": "high",
 }
 
 MAX_RETRIES = 3
-RETRY_BASE_DELAY = 1.0  # seconds
+RETRY_BASE_DELAY = 1.0
 
 
 class OpenAIProvider(LLMProvider):
@@ -135,7 +136,7 @@ class OpenAIProvider(LLMProvider):
         self.total_usage: dict[str, TokenUsage] = {}
 
     def _model(self, tier: Tier) -> str:
-        return os.getenv(_TIER_ENV.get(tier, ""), _TIER_DEFAULT.get(tier, "gpt-4o"))
+        return os.getenv(_TIER_ENV.get(tier, ""), _TIER_DEFAULT.get(tier, "gpt-5-mini"))
 
     def _track(self, tier: Tier, usage: TokenUsage) -> None:
         if tier not in self.total_usage:
@@ -143,7 +144,15 @@ class OpenAIProvider(LLMProvider):
         self.total_usage[tier].prompt_tokens += usage.prompt_tokens
         self.total_usage[tier].completion_tokens += usage.completion_tokens
 
-    # ---- chat (with retry) ------------------------------------------------
+    def _extract_usage(self, resp) -> TokenUsage:
+        if hasattr(resp, 'usage') and resp.usage:
+            return TokenUsage(
+                prompt_tokens=getattr(resp.usage, 'input_tokens', 0) or 0,
+                completion_tokens=getattr(resp.usage, 'output_tokens', 0) or 0,
+            )
+        return TokenUsage()
+
+    # ---- chat via Responses API ----------------------------------------------
 
     async def chat(
         self,
@@ -152,21 +161,22 @@ class OpenAIProvider(LLMProvider):
         response_format: dict | None = None,
         tier: Tier = "smart",
     ) -> LLMResponse:
+        """Call LLM via Responses API. Returns text and/or tool calls."""
         model = self._model(tier)
-        kwargs: dict[str, Any] = {"model": model, "messages": messages}
+        kwargs: dict[str, Any] = {"model": model, "input": messages}
+
         if tools:
             kwargs["tools"] = tools
         if response_format:
-            kwargs["response_format"] = response_format
+            kwargs["text"] = {"format": response_format}
 
-        # Set reasoning effort for models that need it (gpt-5.1 defaults to "none")
         reasoning = _TIER_REASONING.get(tier)
         if reasoning:
-            kwargs["reasoning_effort"] = reasoning
+            kwargs["reasoning"] = {"effort": reasoning}
 
         for attempt in range(MAX_RETRIES):
             try:
-                resp = await self._client.chat.completions.create(**kwargs)
+                resp = await self._client.responses.create(**kwargs)
                 break
             except Exception as exc:
                 if attempt == MAX_RETRIES - 1:
@@ -174,25 +184,38 @@ class OpenAIProvider(LLMProvider):
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
                 await asyncio.sleep(delay)
 
-        msg = resp.choices[0].message
-        usage = TokenUsage(
-            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
-            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
-        )
+        usage = self._extract_usage(resp)
         self._track(tier, usage)
 
+        # Parse output items
+        content = None
         tool_calls: list[ToolCall] = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
+
+        for item in resp.output:
+            if item.type == "message":
+                # Text response
+                for block in item.content:
+                    if hasattr(block, 'text'):
+                        content = (content or "") + block.text
+            elif item.type == "function_call":
+                # Tool call
                 try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
+                    args = json.loads(item.arguments) if isinstance(item.arguments, str) else item.arguments
+                except (json.JSONDecodeError, TypeError):
                     args = {}
-                tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
+                tool_calls.append(ToolCall(
+                    id=item.call_id or item.id,
+                    name=item.name,
+                    arguments=args,
+                ))
 
-        return LLMResponse(content=msg.content, tool_calls=tool_calls, usage=usage)
+        # Fallback: try output_text for simple responses
+        if content is None and hasattr(resp, 'output_text') and resp.output_text:
+            content = resp.output_text
 
-    # ---- structured output (parse into Pydantic model) --------------------
+        return LLMResponse(content=content, tool_calls=tool_calls, usage=usage)
+
+    # ---- structured output via responses.parse() -----------------------------
 
     async def chat_parse(
         self,
@@ -200,17 +223,21 @@ class OpenAIProvider(LLMProvider):
         response_model: type,
         tier: Tier = "smart",
     ) -> Any:
-        """Parse response into a Pydantic model using OpenAI structured output."""
+        """Parse response into a Pydantic model via responses.parse() (GA).
+
+        Uses text_format for structured output.
+        Handles refusals explicitly.
+        """
         model = self._model(tier)
-        kwargs: dict[str, Any] = {"model": model, "messages": messages, "response_format": response_model}
+        kwargs: dict[str, Any] = {"model": model, "input": messages, "text_format": response_model}
 
         reasoning = _TIER_REASONING.get(tier)
         if reasoning:
-            kwargs["reasoning_effort"] = reasoning
+            kwargs["reasoning"] = {"effort": reasoning}
 
         for attempt in range(MAX_RETRIES):
             try:
-                resp = await self._client.beta.chat.completions.parse(**kwargs)
+                resp = await self._client.responses.parse(**kwargs)
                 break
             except Exception as exc:
                 if attempt == MAX_RETRIES - 1:
@@ -218,22 +245,19 @@ class OpenAIProvider(LLMProvider):
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
                 await asyncio.sleep(delay)
 
-        msg = resp.choices[0].message
-        usage = TokenUsage(
-            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
-            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
-        )
+        usage = self._extract_usage(resp)
         self._track(tier, usage)
 
-        if msg.parsed:
-            return msg.parsed
-        # Fallback: try manual parse
-        if msg.content:
-            import json as _json
-            return response_model.model_validate_json(msg.content)
-        raise ValueError(f"Failed to parse response into {response_model.__name__}")
+        # Check refusal
+        if hasattr(resp, 'refusal') and resp.refusal:
+            raise ValueError(f"Model refused: {resp.refusal}")
 
-    # ---- streaming chat ---------------------------------------------------
+        if hasattr(resp, 'output_parsed') and resp.output_parsed:
+            return resp.output_parsed
+
+        raise ValueError(f"No parsed output for {response_model.__name__}")
+
+    # ---- streaming via Responses API -----------------------------------------
 
     async def chat_stream(
         self,
@@ -241,21 +265,25 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict] | None = None,
         tier: Tier = "smart",
     ) -> AsyncIterator[str]:
+        """Stream text tokens via Responses API."""
         model = self._model(tier)
-        kwargs: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+        kwargs: dict[str, Any] = {"model": model, "input": messages, "stream": True}
         if tools:
             kwargs["tools"] = tools
 
-        stream = await self._client.chat.completions.create(**kwargs)
-        async for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                yield delta.content
+        stream = await self._client.responses.create(**kwargs)
+        async for event in stream:
+            # Responses API streams different event types
+            if hasattr(event, 'type'):
+                if event.type == "response.output_text.delta":
+                    yield event.delta
+                elif event.type == "response.content_part.delta":
+                    if hasattr(event, 'delta') and hasattr(event.delta, 'text'):
+                        yield event.delta.text
 
-    # ---- embeddings -------------------------------------------------------
+    # ---- embeddings ----------------------------------------------------------
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        # OpenAI supports up to 2048 texts per call; batch in groups of 512
         all_embeddings: list[list[float]] = []
         batch_size = 512
         for i in range(0, len(texts), batch_size):

@@ -28,14 +28,13 @@ class Tool(ABC):
     async def execute(self, **kwargs: Any) -> ToolResult: ...
 
     def openai_schema(self) -> dict:
-        """Return OpenAI function-calling compatible tool schema."""
+        """Return Responses API tool schema (flat, with strict)."""
         return {
             "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
-            },
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+            "strict": True,
         }
 
 
