@@ -1,97 +1,293 @@
-"""Agent — the main orchestrator wiring plan → execute → learn → synthesize."""
+"""Agent — the single orchestrator for all paths.
+
+Methods:
+  plan()    — goal → structured task plan (STRATEGIC LLM)
+  execute() — run planned tasks in parallel → synthesis
+  turn()    — ReAct loop for follow-ups (yields typed events)
+  ingest()  — add documents to KB
+  status()  — KB stats + recent sessions
+"""
 
 from __future__ import annotations
 
+import json
+import uuid
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, AsyncIterator, Callable
+
 from core.context import ContextManager
 from core.executor import Executor
 from core.knowledge import KnowledgeStore
 from core.llm import OpenAIProvider
 from core.memory import MemoryManager
+from core.models import RewrittenQuery
 from core.planner import Planner
 from core.state import PlanState, StateManager, Task
 from tools.base import ToolRegistry
-from tools.ingest import IngestDocumentsTool
-from tools.knowledge_search import KnowledgeSearchTool
+
+
+# ---------------------------------------------------------------------------
+# Agent events — transport-agnostic (not SSE, not AG-UI)
+# The SSE layer (react_loop.py) converts these to AG-UI format.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentEvent:
+    """A typed event from the agent. Transport-agnostic."""
+    kind: str   # step_start, step_end, tool_start, tool_args, tool_end, tool_result,
+                # text_delta, text_done, rewrite, state, run_start, run_end
+    data: dict
+
+
+MAX_REACT_TURNS = 6
 
 
 class Agent:
-    """Main Planex agent — orchestrates research sessions."""
+    """Main Planex agent — orchestrates all paths."""
 
     def __init__(self) -> None:
-        # Core components
         self.llm = OpenAIProvider()
         self.knowledge = KnowledgeStore(self.llm)
         self.memory = MemoryManager(self.llm)
         self.state = StateManager()
 
-        # Tool registry with wired knowledge store
         self.tools = ToolRegistry()
         self.tools.auto_discover()
 
-        # Wire knowledge store into knowledge-dependent tools
         for tool in self.tools.list_tools():
             if hasattr(tool, "set_store"):
                 tool.set_store(self.knowledge)
 
-        # Context manager
         self.context = ContextManager(self.llm, self.memory)
-
-        # Planner + Executor
         self.planner = Planner(self.llm, self.tools, self.knowledge, self.state)
         self.executor = Executor(self.llm, self.tools, self.knowledge, self.context, self.state)
 
+    # ------------------------------------------------------------------
+    # Plan → Execute path (initial research)
+    # ------------------------------------------------------------------
+
     async def plan(self, goal: str) -> PlanState:
-        """Create a research plan from a goal."""
-        # Load memory for context
         self.memory.load_memory()
-        self.memory.load_daily_notes()
-
-        # Scan sources directory for new docs
-        new_files, new_chunks = await self.knowledge.scan_sources_dir()
-
-        # Create plan
-        plan = await self.planner.create_plan(goal)
-        return plan
+        await self.knowledge.scan_sources_dir()
+        return await self.planner.create_plan(goal)
 
     async def execute(
         self,
         plan: PlanState,
         on_task_update: Callable[[Task, str], None] | None = None,
     ) -> str:
-        """Execute a plan and return the synthesis."""
         synthesis = await self.executor.execute_plan(plan, on_task_update)
-
-        # Save session summary to daily notes + extract learnings to MEMORY.md
-        completed_tasks = [
-            {"title": t.title, "status": t.status}
-            for t in plan.tasks
-        ]
-        output_files = [
-            t.result_summary
-            for t in plan.tasks
-            if t.tool_hint == "write_file" and t.status == "completed"
-        ]
-        extracts = await self.memory.save_session_summary(
-            plan.goal, plan.plan_id, completed_tasks, output_files, synthesis
-        )
-        self.state.set_memory_extracts(plan, extracts)
+        await self._post_session(plan, synthesis)
         return synthesis
 
-    async def run(
-        self,
-        goal: str,
-        on_task_update: Callable[[Task, str], None] | None = None,
-        auto_confirm: bool = False,
-    ) -> tuple[PlanState, str]:
-        """Full pipeline: plan → (confirm) → execute → synthesize."""
+    async def run(self, goal: str, on_task_update=None) -> tuple[PlanState, str]:
         plan = await self.plan(goal)
         synthesis = await self.execute(plan, on_task_update)
         return plan, synthesis
 
+    # ------------------------------------------------------------------
+    # ReAct turn (follow-ups) — yields AgentEvents
+    # ------------------------------------------------------------------
+
+    async def turn(
+        self,
+        user_message: str,
+        chat_history: list[dict],
+        session_id: str | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run a follow-up turn through the ReAct loop.
+
+        Yields AgentEvents (transport-agnostic).
+        Handles: query rewriting, context assembly, tool calls, streaming,
+        AND post-processing (memory extraction, KB ingestion, session save).
+        """
+        run_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
+        # Load session
+        session_context = ""
+        plan = None
+        if session_id:
+            plan = self.state.load(session_id)
+            if plan:
+                session_context = (plan.synthesis or "")[:3000]
+
+        yield AgentEvent("run_start", {"runId": run_id})
+
+        # Step 1: Rewrite query
+        yield AgentEvent("step_start", {"stepId": "rewrite", "name": "Interpreting query"})
+        query = await self._rewrite_query(user_message, chat_history, session_context)
+        if query != user_message:
+            yield AgentEvent("rewrite", {"query": query})
+        yield AgentEvent("step_end", {"stepId": "rewrite"})
+
+        # Step 2: Assemble context
+        messages = self._build_context(query, chat_history, session_context)
+
+        # Step 3: ReAct loop
+        yield AgentEvent("step_start", {"stepId": "react", "name": "Thinking"})
+
+        tools_schema = self.tools.get_tools_schema()
+        full_response = ""
+        used_tools = False
+
+        for turn_num in range(MAX_REACT_TURNS):
+            resp = await self.llm.chat(
+                messages=messages,
+                tools=tools_schema if tools_schema else None,
+                tier="smart",
+            )
+
+            if resp.tool_calls:
+                used_tools = True
+                for tc in resp.tool_calls:
+                    tool_call_id = tc.id or str(uuid.uuid4())[:8]
+
+                    yield AgentEvent("tool_start", {"toolCallId": tool_call_id, "toolName": tc.name})
+                    yield AgentEvent("tool_args", {"toolCallId": tool_call_id, "args": tc.arguments})
+
+                    # Execute
+                    tool = self.tools.get(tc.name)
+                    if tool:
+                        try:
+                            result = await tool.execute(**tc.arguments)
+                            tool_output = result.data[:2000]
+                        except Exception as e:
+                            tool_output = f"Tool error: {e}"
+                    else:
+                        tool_output = f"Unknown tool: {tc.name}"
+
+                    yield AgentEvent("tool_end", {"toolCallId": tool_call_id})
+                    yield AgentEvent("tool_result", {"toolCallId": tool_call_id, "content": tool_output[:500]})
+
+                    # Append in Responses API format
+                    messages.append({"type": "function_call", "call_id": tool_call_id, "name": tc.name, "arguments": json.dumps(tc.arguments)})
+                    messages.append({"type": "function_call_output", "call_id": tool_call_id, "output": tool_output})
+
+                continue  # loop — LLM sees tool results
+
+            full_response = resp.content or ""
+            break
+
+        yield AgentEvent("step_end", {"stepId": "react"})
+
+        # Step 4: Stream response
+        if used_tools and full_response:
+            # Already have response from chat() — chunk it
+            for i in range(0, len(full_response), 30):
+                yield AgentEvent("text_delta", {"delta": full_response[i:i+30]})
+        else:
+            # True streaming — no tools were called
+            full_response = ""
+            async for token in self.llm.chat_stream(messages=messages, tier="smart"):
+                full_response += token
+                yield AgentEvent("text_delta", {"delta": token})
+
+        yield AgentEvent("text_done", {"full": full_response})
+
+        # Step 5: Post-processing (same as execute() path)
+        if plan:
+            self.state.add_chat_message(plan, "user", user_message)
+            self.state.add_chat_message(plan, "assistant", full_response)
+
+            # Extract learnings from substantial responses
+            if len(full_response) > 500:
+                try:
+                    extracts = await self.memory._extract_learnings(
+                        plan.goal, full_response
+                    )
+                    if extracts:
+                        plan.memory_extracts.extend(extracts)
+                        self.state.save(plan)
+                except Exception:
+                    pass
+
+                # Auto-ingest into KB if it's substantial research
+                if used_tools and len(full_response) > 300:
+                    try:
+                        await self.knowledge.ingest_text(
+                            text=full_response,
+                            source=f"followup:{plan.plan_id}",
+                            source_type="session_synthesis",
+                            ingested_by=f"session:{plan.plan_id}",
+                            title=f"Follow-up: {user_message[:50]}",
+                        )
+                    except Exception:
+                        pass
+
+        elapsed = time.time() - start_time
+        total_tokens = sum(u.total for u in self.llm.total_usage.values()) if self.llm.total_usage else 0
+
+        yield AgentEvent("state", {"status": "done", "tokens": total_tokens, "duration": round(elapsed, 1)})
+        yield AgentEvent("run_end", {"runId": run_id})
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    async def _rewrite_query(self, message: str, history: list[dict], session_context: str) -> str:
+        if not history and not session_context:
+            return message
+        if len(message.split()) > 25:
+            return message
+
+        prompt = (
+            "Rewrite this message into a standalone question. "
+            "Resolve ALL pronouns using the research context.\n"
+            "Return the original if already clear.\n\n"
+            + (f"RESEARCH CONTEXT:\n{session_context[:800]}\n\n" if session_context else "")
+            + (f"CONVERSATION:\n" + "\n".join(f"{m['role']}: {m['content'][:100]}" for m in history[-4:]) + "\n\n" if history else "")
+            + f"MESSAGE: {message}"
+        )
+        try:
+            result: RewrittenQuery = await self.llm.chat_parse(
+                messages=[{"role": "user", "content": prompt}],
+                response_model=RewrittenQuery,
+                tier="fast",
+            )
+            return result.query if result.changed else message
+        except Exception:
+            return message
+
+    def _build_context(self, query: str, chat_history: list[dict], session_context: str) -> list[dict]:
+        memory_md = self.memory.load_memory()
+
+        system_parts = [
+            "You are Planex, an AI research assistant with a persistent knowledge base.",
+            "Use markdown formatting. Be thorough but concise. Cite sources.",
+            "SCOPE: Research only — search, read, analyze, compare, synthesize.",
+            "You have access to tools. Use them when you need current information.",
+            "If you can answer from the provided context, do so without calling tools.",
+        ]
+        if memory_md.strip():
+            system_parts.append(f"\n[Long-term memory]\n{memory_md[:600]}")
+        if session_context:
+            system_parts.append(f"\n[Current research]\n{session_context}")
+
+        system = "\n".join(system_parts)
+        messages = [{"role": "system", "content": system}]
+        for m in chat_history[-6:]:
+            messages.append({"role": m["role"], "content": m["content"]})
+        messages.append({"role": "user", "content": query})
+        return messages
+
+    async def _post_session(self, plan: PlanState, synthesis: str) -> None:
+        """Post-processing after plan execution — memory + KB."""
+        completed_tasks = [{"title": t.title, "status": t.status} for t in plan.tasks]
+        output_files = [t.result_summary for t in plan.tasks if t.tool_hint == "write_file" and t.status == "completed"]
+
+        extracts = await self.memory.save_session_summary(
+            plan.goal, plan.plan_id, completed_tasks, output_files, synthesis
+        )
+        self.state.set_memory_extracts(plan, extracts)
+
+    # ------------------------------------------------------------------
+    # Ingest + Status
+    # ------------------------------------------------------------------
+
     async def ingest(self, path: str) -> tuple[int, int]:
-        """Ingest files from a path into the knowledge base."""
         p = Path(path).expanduser().resolve()
         if p.is_file():
             chunks = await self.knowledge.ingest_file(str(p), "local_file", "user_upload")
@@ -101,7 +297,6 @@ class Agent:
         return 0, 0
 
     def status(self) -> dict:
-        """Return KB stats and recent sessions."""
         return {
             "knowledge_base": self.knowledge.get_stats(),
             "recent_sessions": self.state.list_sessions(),

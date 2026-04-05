@@ -137,58 +137,68 @@ class Executor:
             resp = await self._llm.chat(messages=messages, tools=tools_schema, tier="smart")
 
             if resp.tool_calls:
-                tc = resp.tool_calls[0]  # Use first tool call
-                tool = self._tools.get(tc.name)
+                # Execute ALL tool calls (not just the first)
+                all_results: list[str] = []
 
-                if tool is None:
-                    raise ValueError(f"Unknown tool: {tc.name}")
+                for tc in resp.tool_calls:
+                    tool = self._tools.get(tc.name)
+                    if tool is None:
+                        all_results.append(f"[Unknown tool: {tc.name}]")
+                        continue
 
-                # Execute tool
-                result = await tool.execute(**tc.arguments)
+                    result = await tool.execute(**tc.arguments)
 
-                # Log the tool call
-                duration_ms = int((time.time() - start_time) * 1000)
-                self._state.add_log(plan, LogEntry(
-                    timestamp=datetime.utcnow().isoformat(),
-                    event_type="tool_call",
-                    task_id=task.id,
-                    tool_name=tc.name,
-                    input_summary=json.dumps(tc.arguments)[:200],
-                    output_summary=result.data[:200],
-                    tokens_used=resp.usage.total,
-                    duration_ms=duration_ms,
-                ))
+                    # Log
+                    self._state.add_log(plan, LogEntry(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="tool_call",
+                        task_id=task.id,
+                        tool_name=tc.name,
+                        input_summary=json.dumps(tc.arguments)[:200],
+                        output_summary=result.data[:200],
+                        tokens_used=resp.usage.total,
+                        duration_ms=int((time.time() - start_time) * 1000),
+                    ))
 
-                if result.success:
-                    # Summarize result
-                    summary_resp = await self._llm.chat(
-                        messages=[{"role": "user", "content": SUMMARIZE_PROMPT.format(
-                            tool_name=tc.name, result=result.data[:3000]
-                        )}],
-                        tier="fast",
-                    )
-                    summary = summary_resp.content or result.data[:500]
+                    if result.success:
+                        all_results.append(result.data)
 
-                    # Auto-learn: ingest web content into KB
-                    if tc.name in ("read_url", "web_search") and result.metadata.get("url"):
-                        try:
-                            await self._kb.ingest_text(
-                                text=result.data,
-                                source=result.metadata.get("url", "web"),
-                                source_type="web_page",
-                                ingested_by=f"session:{plan.plan_id}",
-                                title=result.metadata.get("title", ""),
-                            )
-                        except Exception:
-                            pass  # non-critical
+                        # Auto-ingest web content into KB
+                        if tc.name in ("read_url", "web_search") and len(result.data) > 100:
+                            try:
+                                await self._kb.ingest_text(
+                                    text=result.data,
+                                    source=result.metadata.get("url", f"web:{tc.name}"),
+                                    source_type="web_page",
+                                    ingested_by=f"session:{plan.plan_id}",
+                                    title=result.metadata.get("title", task.title[:50]),
+                                )
+                            except Exception:
+                                pass
+                    else:
+                        all_results.append(f"[Failed: {result.data[:100]}]")
+
+                if all_results:
+                    combined = "\n\n".join(all_results)
+
+                    # Only summarize if result is long (skip LLM call for short results)
+                    if len(combined) > 500:
+                        summary_resp = await self._llm.chat(
+                            messages=[{"role": "user", "content": SUMMARIZE_PROMPT.format(
+                                tool_name=resp.tool_calls[0].name, result=combined[:3000]
+                            )}],
+                            tier="fast",
+                        )
+                        summary = summary_resp.content or combined[:500]
+                    else:
+                        summary = combined
 
                     self._state.update_task(plan, task.id, "completed", summary)
                     self._ctx.add_task_result(task.id, task.title, summary)
                     if on_task_update:
                         on_task_update(task, "completed")
                 else:
-                    # Tool failed — retry once
-                    self._state.update_task(plan, task.id, "failed", f"Tool error: {result.data[:200]}")
+                    self._state.update_task(plan, task.id, "failed", "All tool calls failed")
                     if on_task_update:
                         on_task_update(task, "failed")
             else:
