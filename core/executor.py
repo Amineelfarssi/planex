@@ -64,8 +64,7 @@ class Executor:
         on_task_update: Callable[[Task, str], None] | None = None,
     ) -> str:
         """Execute all tasks in dependency order, then synthesize."""
-        plan.status = "executing"
-        self._state.save(plan)
+        self._state.set_status(plan, "executing")
 
         groups = self._state.get_pending_groups(plan)
 
@@ -86,9 +85,8 @@ class Executor:
 
         # Synthesize final answer
         synthesis = await self._synthesize(plan)
-        plan.synthesis = synthesis
-        plan.status = "completed"
-        self._state.save(plan)
+        self._state.set_synthesis(plan, synthesis)
+        self._state.set_status(plan, "completed")
 
         # Auto-ingest synthesis into KB (grows the knowledge base silently)
         if synthesis and len(synthesis) > 100:

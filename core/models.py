@@ -1,7 +1,8 @@
 """Structured output models for all LLM calls.
 
-Uses Pydantic models with OpenAI's native structured output
-(client.beta.chat.completions.parse) for guaranteed type-safe responses.
+Every model here is passed to client.responses.parse(text_format=Model)
+or used as a data schema for LanceDB. OpenAI guarantees the response
+matches the schema — zero parsing failures.
 """
 
 from __future__ import annotations

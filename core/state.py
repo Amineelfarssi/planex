@@ -94,6 +94,18 @@ class StateManager:
     def add_log(self, plan: PlanState, entry: LogEntry) -> None:
         plan.logs.append(entry)
 
+    def set_status(self, plan: PlanState, status: str) -> None:
+        plan.status = status
+        self.save(plan)
+
+    def set_synthesis(self, plan: PlanState, synthesis: str) -> None:
+        plan.synthesis = synthesis
+        self.save(plan)
+
+    def set_memory_extracts(self, plan: PlanState, extracts: list[str]) -> None:
+        plan.memory_extracts = extracts
+        self.save(plan)
+
     def get_task(self, plan: PlanState, task_id: str) -> Task | None:
         for t in plan.tasks:
             if t.id == task_id:

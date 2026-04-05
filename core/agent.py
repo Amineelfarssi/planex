@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable
-
 from core.context import ContextManager
 from core.executor import Executor
 from core.knowledge import KnowledgeStore
@@ -77,10 +76,7 @@ class Agent:
         extracts = await self.memory.save_session_summary(
             plan.goal, plan.plan_id, completed_tasks, output_files, synthesis
         )
-        plan.memory_extracts = extracts
-
-        # Save final state
-        self.state.save(plan)
+        self.state.set_memory_extracts(plan, extracts)
         return synthesis
 
     async def run(
