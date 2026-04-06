@@ -1,160 +1,148 @@
-<!-- 
-  Generated with:
-    planex run "Research the latest advances in prompt optimization techniques and compare approaches" -y --transcript > examples/transcript_research.md
-  
-  Or reproduce any session:
-    planex run "your goal" -y --transcript > transcript.md
--->
+# Research Session: Compare RAG vs fine-tuning for domain-specific legal AI
 
-
-# Research Session: Research plan on prompt optimization techniques and compare approaches
-
-**Goal:** Research the latest advances in prompt optimization techniques and compare approaches
-**Session ID:** `1779645b`
+**Goal:** Compare RAG vs fine-tuning for domain-specific legal AI
+**Session ID:** `bcb82376`
 **Status:** completed
 
 ## Plan
 
-- ✅ **t1**: Use web search to identify recent prompt optimization techniques and compare approaches — `web_search`
-- ✅ **t2**: Read key survey or overview articles on prompt optimization techniques and compare approaches — `read_url` *(after t1)*
-- ✅ **t3**: Read representative primary papers on distinct prompt optimization techniques and compare approaches — `read_url` *(after t1)*
-- ✅ **t4**: Draft structured comparison of prompt optimization techniques and compare approaches — `write_file` *(after t2, t3)*
-- ✅ **t5**: Write final synthesis report on prompt optimization techniques and compare approaches — `write_file` *(after t4)*
+- ✅ **t1**: Search knowledge base for prior work on legal AI RAG vs fine-tuning — `knowledge_search`
+- ✅ **t2**: Web search for conceptual comparisons of RAG vs fine-tuning in legal AI — `ddg_search`
+- ✅ **t3**: Read key web articles on RAG vs fine-tuning for domain-specific legal AI — `read_url` *(after t2)*
+- ✅ **t4**: Web search for empirical studies and benchmarks of legal RAG and fine-tuned legal models — `ddg_search`
+- ✅ **t5**: Synthesize findings into a comparison framework for legal AI RAG vs fine-tuning — `write_file` *(after t1, t3, t4)*
 
 ## Execution Log
 
 | Time | Event | Tool | Detail |
 |------|-------|------|--------|
-| 21:59:11 | plan_created |  | Plan 'Research plan on prompt optimization techniques and compare approaches' wi |
-| 21:59:26 | tool_call | web_search | Do you want me to:  - Search arXiv for 2023 surveys specifically about "prompt o |
-| 22:00:04 | tool_call | web_search | Got it — here’s the paper and PDF links.  - Official EMNLP paper (PDF) — availab |
-| 22:00:34 | tool_call | web_search | Here’s a compact, curated list of surveys, tutorials and high‑level reviews (202 |
-| 22:01:25 | tool_call | write_file | Written to /Users/amine/.planex/outputs/prompt_optimization_techniques_and_compa |
-| 22:01:35 | tool_call | knowledge_search | **[Optimize Anything with LLMs]** (type: web_page) # Optimize Anything with LLMs |
-| 22:02:20 | synthesis |  | Below is a concise synthesis of recent advances in prompt optimization (2020–202 |
+| 11:06:59 | plan_created | — | Plan 'Compare RAG vs fine-tuning for domain-specific legal AI' with 5 tasks |
+| 11:07:07 | tool_call | knowledge_search | **[Legal RAG Bench: an end-to-end benchmark for legal RAG]** (type: local_file)  |
+| 11:07:07 | tool_call | knowledge_search | **[Legal RAG Bench: an end-to-end benchmark for legal RAG]** (type: local_file)  |
+| 11:07:08 | tool_call | knowledge_search | **[Legal RAG Bench: an end-to-end benchmark for legal RAG]** (type: local_file)  |
+| 11:07:12 | tool_call | ddg_search | **A Reasoning-Focused Legal Retrieval Benchmark - GitHub Pages**   URL: https:// |
+| 11:07:14 | tool_call | ddg_search | **RAG vs. Fine-Tuning: Choosing the Right Approach for AI Model**   URL: https:/ |
+| 11:07:15 | tool_call | ddg_search | **Retrieval-augmentedgeneration- Wikipedia**   URL: https://en.wikipedia.org/wik |
+| 11:07:16 | tool_call | ddg_search | **Large language models in legaltech: Demystifying fine-tuning \| Draftwise \| Leg |
+| 11:07:19 | tool_call | ddg_search | **[2408.10343] LegalBench-RAG: A Benchmark for**   URL: https://arxiv.org/abs/24 |
+| 11:07:20 | tool_call | ddg_search | **Generative AI 101: When to useRAGvsFineTuning? - YouTube**   URL: https://www. |
+| 11:07:21 | tool_call | ddg_search | **Fujitsu/agentic-rag-redteam-bench · Datasets at Hugging Face**   URL: https:// |
+| 11:07:23 | tool_call | ddg_search | **Understanding and Implementing Retrieval Augmented Generation RAG**   URL: htt |
+| 11:08:04 | tool_call | ddg_search | **Retrieval-augmented generation (RAG): towards a promising LLM ...**   URL: htt |
+| 11:08:06 | tool_call | ddg_search | **[2408.10343] LegalBench-RAG: A Benchmark for Retrieval-Augmented ...**   URL:  |
+| 11:08:07 | tool_call | ddg_search | **[2505.03970] A Reasoning-Focused Legal Retrieval Benchmark - arXiv.org**   URL |
+| 11:08:08 | tool_call | ddg_search | **[PDF] 1 Legal Retrieval-Augmented Generation (RAG)**   URL: https://moritzlaw. |
+| 11:09:16 | tool_call | write_file | Written to /Users/amine/.planex/outputs/legal_ai_RAG_vs_finetuning_plan.md |
+| 11:09:59 | synthesis | — | Below is a structured, evidence‑based comparison of Retrieval‑Augmented Generati |
 
 ## Synthesis
 
-Below is a concise synthesis of recent advances in prompt optimization (2020–2024), a structured comparison of major approaches, practical recommendations, and open research directions. I cite the surveys and representative papers found in your search results; I can export BibTeX or a one‑page reading summary on request.
+Below is a structured, evidence‑based comparison of Retrieval‑Augmented Generation (RAG) vs. fine‑tuning for domain‑specific legal AI, synthesized from the materials you provided (papers, benchmarks, and practical guides). I highlight key empirical findings, decision criteria, recommended experiments, and an implementation checklist for legal teams.
 
-1) High‑level taxonomy (what “prompt optimization” covers)
-- Manual / human prompt engineering: hand‑crafted natural language instructions and examples (few‑shot, zero‑shot).
-- Example/exemplar selection & ordering: choosing few‑shot exemplars (k‑shot selection, clustering, diversity).
-- Chain‑of‑Thought (CoT) and reasoning prompts: prompting styles that elicit stepwise reasoning (self‑consistency, voting).
-- Automated discrete prompt search: algorithmic search over literal textual prompts (e.g., AutoPrompt).
-- Continuous / soft prompting and prefix tuning: learnable embedding prompts that require model weight access (P‑tuning, prompt tuning, prefix tuning).
-- Black‑box optimization: treat model as oracle and optimize prompts via black‑box optimizers (evolutionary algs, Bayesian optimization, RL).
-- Data‑free / zero‑data optimization: methods that need few or no labeled examples and optimize prompts by model interrogation (e.g., GEPA-style claims).
-- Meta‑prompting and ensemble/meta‑learning: learn higher‑level strategies that output prompts or prompt templates.
-- Multimodal & vision‑language prompting: prompting strategies for models that accept images + text.
+Executive summary
+- RAG is generally the preferred first approach for many legal tasks because it grounds outputs in external documents (reducing many hallucinations), is easier to update, and requires less labeled training data. Several benchmarks and reviews argue RAG’s practicality for legal work (Harvard JOLT Digest, Apr 2, 2025; arXiv work on legal RAG, May 4, 2025).
+- Fine‑tuning can outperform RAG on highly constrained tasks when large, high‑quality domain datasets exist and latency/operational simplicity are priorities, but it is more expensive to maintain and more brittle to data drift.
+- Empirical work (Legal RAG Bench, Butler et al., Mar 2, 2026) shows retrieval quality is the dominant performance driver: many hallucinations attributed to the LLM actually originate from retrieval failures. A strong embedding/retrieval stack can produce the largest gains in correctness and groundedness.
+- Practical recommendation: start with RAG + careful retrieval engineering and strong evaluation; consider fine‑tuning (or hybridizing) only after measuring residual errors and if use‑case constraints demand it.
 
-Key sources and surveys (2023–2024)
-- Systematic surveys and tutorials assembled in 2023–2024 (examples you collected): Liu (Nov 2023) “Pre‑train, Prompt, and Predict” style survey; Qiao (ACL 2023) prompting overview; Amatriain (Jan 2024), Sahoo et al. (Feb 2024), Schulhoff et al. (Jun 2024), Ye (2024). A vision‑language prompting survey (Jul 2023) covers multimodal prompts. These provide overviews, datasets, and comparisons across the methods above.
-- Representative primary papers: AutoPrompt (Shin et al., EMNLP 2020; arXiv:2010.15980) for discrete automated prompts; Tree of Thoughts (Yao et al., 2023, rev. Dec 2023) for structured reasoning prompting.
+Definitions (short)
+- RAG: At inference, the model retrieves relevant documents from an external corpus (via embedding/vector search or symbolic indices) and conditions generation on those retrieved passages.
+- Fine‑tuning: Update model weights on domain‑specific labeled examples (supervised or instruction‑tuning) so the model internalizes domain knowledge.
 
-Also notable recent product/technique claim:
-- GEPA / “Optimize Anything with LLMs” (product page): a zero‑training‑data, black‑box prompt optimization system that claims strong cost/time improvements vs RL and shows concrete improvement on AIME 2025 with GPT‑4.1 Mini (46.6%→56.6%). It emphasizes human‑readable traces, works with as few as 3 examples, and is intended as a rapid complement to RL/fine‑tuning. (Source: Optimize Anything with LLMs page.)
+Key empirical findings (from provided sources)
+- Legal RAG Bench (Butler et al., Mar 2, 2026): used 4,876 passages (Victorian Criminal Charge Book) and 100 complex questions; evaluated 3 embedding methods (Kanon 2 Embedder, Gemini Embedding 001, Text Embedding 3 Large) and 2 LLMs (Gemini 3.1 Pro, GPT‑5.2). Kanon 2 produced the largest improvements: average correctness +17.5 points, groundedness +4.5 points, retrieval accuracy +34 points. The work concluded retrieval quality was the main driver and many hallucinations were retrieval failures. Code/data released for reproducibility. (Butler et al., 2026)
+- Benchmarks focusing on reasoning‑heavy legal retrieval tasks (Bar Exam QA, Housing Statute QA — arXiv:2505.03970 / ACM paper Mar 25, 2025) show the importance of retrieval design and evaluation that separates retrieval vs. reasoning errors.
+- Multiple reviews and practitioner guides (e.g., DeepChecks, Intersog, App Academy and others, 2024–2025) summarize tradeoffs: costs, compliance, maintainability, and operational complexity.
 
-2) Comparison of approaches (concise, by criteria)
+Comparison by dimension
 
-- Human prompt engineering
-  - Data / labels: none (manual).
-  - Model access: none.
-  - Compute: minimal.
-  - Pros: fast, interpretable, cheap.
-  - Cons: brittle, suboptimal, labor‑intensive; scaling to many tasks is inefficient.
-  - Use when: prototyping, small tasks, interpretability required.
+1) Accuracy, groundedness, and hallucinations
+- RAG: Tends to produce more grounded outputs when retrieval returns correct, on‑topic passages. However, “confident wrong” answers occur when retrieval returns irrelevant or misleading chunks (silent degradation). Legal RAG Bench quantifies large gains from better embeddings/retrieval—implying retrieval is the weak link for grounding (Butler et al., 2026).
+- Fine‑tuning: Can produce high task accuracy on distributional data it was trained on and may hallucinate less for those tasks, but can still hallucinate when asked beyond training distribution or when statutes/cases change.
 
-- Exemplar selection / few‑shot design
-  - Data: requires a small labeled set to choose exemplars.
-  - Model access: none.
-  - Pros: large effect on performance; simple to apply to closed‑API LLMs.
-  - Cons: exemplar selection is combinatorial; sensitivity to order.
-  - Use when: few labeled examples exist and model is accessed via API.
+2) Data requirements & sample efficiency
+- RAG: Low upfront labeled data needs; main requirement is a clean, searchable corpus and a reasonable retrieval index. Good for corpora of statutes, briefs, contract libraries, precedents.
+- Fine‑tuning: Requires sizable labeled data (or high‑quality instruction pairs) to reach parity on complex tasks. For many legal tasks, obtaining enough curated labels is costly.
 
-- Chain‑of‑Thought (CoT) and structured reasoning (including Tree of Thoughts)
-  - Data: may need few exemplars or engineered prompt templates.
-  - Model access: none.
-  - Pros: substantial gains on reasoning tasks; can be combined with self‑consistency for robustness.
-  - Cons: longer outputs, more compute per query; not always effective for smaller models.
-  - Use when: complex reasoning or multi‑step problems.
+3) Updatability & handling legal change
+- RAG: Easily updated—swap or append documents to the vector store when law changes. Good for time‑sensitive legal corpora.
+- Fine‑tuning: Requires retraining or continual fine‑tuning to incorporate new law; slower and more costly to update.
 
-- Discrete automated search (AutoPrompt, greedy/search)
-  - Data: can be data‑free or need validation set.
-  - Model access: usually requires gradient access for some variants (AutoPrompt used gradient signals on BERT), but discrete search variants can be black‑box.
-  - Pros: finds non‑intuitive trigger phrases; effective for knowledge elicitation.
-  - Cons: discovered prompts can be brittle, uninterpretable, or exploit model artifacts.
-  - Use when: extracting latent knowledge or optimizing small discrete prompt tokens.
+4) Compliance, provenance & explainability
+- RAG: Stronger provenance—can cite source documents; easier to produce extractable citations and audit trails (important for legal/regulatory compliance).
+- Fine‑tuning: Less natural provenance—model answers are internalized and harder to attribute to specific documents unless combined with retrieval/evidence pipelines.
 
-- Continuous / soft prompting and prefix tuning (P‑tuning, prompt tuning)
-  - Data: needs labeled data to train the prompt embeddings.
-  - Model access: white‑box (access to model weights or fine‑tuning hooks).
-  - Compute: lower than full fine‑tuning, but requires training.
-  - Pros: parameter‑efficient; good for transfer to downstream tasks; often robust.
-  - Cons: not applicable to closed‑API models (unless provider enables soft prompts); less interpretable.
-  - Use when: you have model weights or provider supports tuning; want parameter‑efficient adaptation.
+5) Cost & operational complexity
+- RAG: Costs stem from embedding/recall (vector DB, embedding model calls) and LLM inference. Ongoing operational costs for index maintenance and re‑embedding when changing embedding models.
+- Fine‑tuning: High one‑time compute and data‑labeling costs for training; lower per‑query complexity (no retrieval step) and often lower inference cost if using a smaller fine‑tuned model.
 
-- Black‑box optimization (Bayesian opt, evolutionary, RL on prompts)
-  - Data: validation set + evaluation budget.
-  - Model access: only API (black‑box).
-  - Compute: can be expensive (many evals), though some methods reduce cost.
-  - Pros: works with closed APIs; can optimize arbitrary prompt components (instruction, examples, system messages).
-  - Cons: sample‑inefficient; quality depends on optimization algorithm and noise in eval.
-  - Use when: closed‑API LLMs and labeled eval metric available.
+6) Latency & scale
+- RAG: Typically higher latency (embedding search + LLM). Engineering (caching, approximate nearest neighbor tuning, pre‑retrieval filters) can mitigate.
+- Fine‑tuning: Lower latency if models are small and hosted efficiently, but larger fine‑tuned LLMs may still be costly.
 
-- Zero‑/few‑example black‑box optimizers with interpretability (GEPA‑style)
-  - Data: claims to work with as few as 3 examples or zero training data.
-  - Model access: black‑box API only.
-  - Pros: fast prototyping; human‑readable traces; low infrastructural cost per claims.
-  - Cons: claims need independent academic validation; may not match fine‑tuning/RL in final performance for large production deployments.
-  - Use when: rapid iteration, scarce labeled data, or costly rollouts — then escalate to RL/fine‑tuning.
+7) Robustness and domain specificity
+- RAG: Robust to domain drift in the corpus (you update docs) but sensitive to retrieval quality and chunking strategy (how documents are split).
+- Fine‑tuning: May overfit to training artifacts and degrade when legal language or user queries vary.
 
-3) Practical workflows & recommended hybrids
-- Rapid prototyping on closed APIs:
-  1. Manual prompt + exemplar selection + CoT (if reasoning).
-  2. Run a black‑box optimizer (e.g., GEPA or Bayesian/evolutionary) to refine prompts quickly.
-  3. Use human‑readable traces to assess safety/failure modes.
-  4. If performance still insufficient, collect labeled examples for exemplar selection or fine‑tuning.
+8) Evaluation and error analysis
+- RAG: Requires separate evaluation of retrieval accuracy, groundedness (are citations correct), and final reasoning correctness. Legal RAG Bench used hierarchical error decomposition to separate retrieval vs. reasoning errors—this is essential.
+- Fine‑tuning: Evaluate on held‑out labeled data; use adversarial/legal‑review tests for hallucinations and citation fidelity if you try to force provenance.
 
-- White‑box / production deployment:
-  1. Start with instruction tuning or soft prompt tuning (P‑tuning/prefix tuning) for parameter efficiency.
-  2. Use RL (policy optimization / RLHF) if behavior needs to be optimized under complex reward signals.
-  3. Combine with automated discrete search for instruction phrasing and with exemplar selection for few‑shot tasks.
+When to prefer RAG (practical rules of thumb)
+- Corpus is large, frequently changing, or proprietary (statutes, regulatory updates, internal precedents).
+- You need strong provenance and audit trails for compliance or to support human lawyers with citations.
+- You lack large labeled training datasets.
+- You want rapid iteration and the ability to update knowledge without retraining.
+- You want to test feasibility quickly and explore what tasks actually require model adaptation vs. retrieval improvements.
 
-- Reasoning tasks:
-  - Use CoT prompts + self‑consistency (sample multiple reasoning chains and majority vote).
-  - For hard combinatorial tasks, use Tree of Thoughts or structured prompting to explore reasoning trajectories.
+When to prefer fine‑tuning
+- You have a large, high‑quality labeled dataset that matches target tasks (e.g., standardized forms, classification, templated drafting).
+- Low latency and minimal runtime infrastructure complexity are top priorities.
+- Task behavior must be highly consistent/deterministic (e.g., strict classification).
+- You need best possible performance on a narrowly defined task and are prepared to maintain retraining pipelines.
 
-4) Evaluation best practices
-- Use held‑out validation/test sets that reflect deployment distribution.
-- Report cost and latency (important for black‑box iterative methods).
-- Report robustness: paraphrase prompts, adversarial prompts, distribution shift.
-- Human evaluation for open‑ended tasks and safety metrics for harmful outputs.
-- Compare against strong baselines: human engineered prompts, few‑shot exemplars, prompt tuning when possible.
+Hybrid and staged approaches (recommended)
+- Start with RAG + strong retrieval engineering and evaluation. Measure residual failure modes (retrieval vs reasoning).
+- If residual errors are mostly reasoning errors that cannot be fixed by retrieval improvements, consider fine‑tuning a model on curated instruction pairs or chain‑of‑thought exemplars.
+- A common hybrid: fine‑tune a smaller legal‑specialized LLM for core tasks, then use RAG for supporting evidence and up‑to‑date citations.
+- Use retrieval to surface evidence and a fine‑tuned model to synthesize/format. This can combine provenance with improved reasoning on domain patterns.
 
-5) Strengths, limitations, and open research directions
-- Strengths of recent advances:
-  - Large gains from prompting strategies (CoT, self‑consistency).
-  - Parameter‑efficient adaptation via soft prompts and prefix tuning.
-  - Black‑box optimizers (including commercial tools like GEPA) make optimization accessible for closed APIs.
-- Limitations and open problems:
-  - Reproducibility: many commercial claims (speed/cost gains) need independent peer review.
-  - Robustness and generalization: prompts can be brittle under distribution shift.
-  - Interpretability: soft prompts are effective but hard to interpret.
-  - Evaluation: lack of standardized benchmarks for prompt optimization methods across tasks and modalities.
-  - Multimodal prompting: emerging area — how to jointly optimize textual and visual prompt components.
-  - Scaling laws: how optimization behavior changes as models scale (and cost tradeoffs).
+Recommended experimental setup (practical, replicable)
+- Baseline: RAG with several embedding models + vector DB + off‑the‑shelf LLM (zero‑shot). Evaluate on held‑out QA/bench set.
+- Ablations: vary embedding model, chunk size, retrieval k (top‑k), re‑ranking strategy.
+- Compare to: a fine‑tuned model trained on the same task data (use identical evaluation set).
+- Metrics to capture: correctness (accuracy), groundedness (fraction of answers supported by cited passages), retrieval accuracy (is the gold passage among top‑k), and calibration/overconfidence measures.
+- Use full factorial or hierarchical error decomposition (as Legal RAG Bench did) to attribute errors to retrieval vs. reasoning. Example resource: Legal RAG Bench (Butler et al., Mar 2, 2026) used 4,876 passages and 100 complex questions—good template for small‑scale reproducible experiments.
 
-6) Concrete references (from your findings; ask me to export full BibTeX)
-- AutoPrompt: Shin et al., EMNLP 2020 — “AutoPrompt: Eliciting Knowledge from Language Models with Automatically Generated Prompts” (arXiv:2010.15980).
-- Tree of Thoughts: Yao et al., 2023 — “Tree of Thoughts: Deliberate Problem Solving with Large Language Models” (submitted May 17 2023, revised Dec 3 2023).
-- Surveys & tutorials (2023–2024): Liu (Nov 2023) systematic survey; Qiao (ACL 2023) prompting methods; Amatriain (Jan 2024), Sahoo et al. (Feb 2024), Schulhoff et al. (Jun 2024), Ye (2024), vision‑language prompting survey (Jul 2023).
-- GEPA / Optimize Anything with LLMs: product page describing zero‑data black‑box optimization and reported empirical claims (AIME 2025 result, users such as Shopify/Databricks/Dropbox).
+Operational checklist (before production rollout)
+- Data curation: canonicalize statutes/cases; decide chunking and metadata (jurisdiction, date).
+- Embeddings: benchmark multiple embedders for retrieval accuracy (Legal RAG Bench found large differences; Kanon 2 gave big gains in that study).
+- Instrumentation: logs, provenance capture, retrieval diagnostics (what was retrieved, distances), and human review workflows.
+- Evaluation suite: include reasoning benchmarks (Bar Exam QA, Housing Statute QA), domain‑specific holdouts, adversarial/legal red‑team tests.
+- Governance: legal review, compliance checks, retention & PII policies, and clear user disclaimers for non‑binding outputs.
+- Update policy: how often to re‑embed corpus, when to retrain/fine‑tune, and monitoring for drift.
 
-7) Suggested next steps I can perform for you
-- Export a one‑page reading summary or a BibTeX file for the surveys and key papers.
-- Retrieve and summarize full PDFs (AutoPrompt, Tree of Thoughts, specific surveys).
-- Generate a runnable checklist/workflow (code snippets) for applying a GEPA‑style black‑box optimizer vs soft prompting vs RL.
-- Produce a comparison table (CSV/Markdown) tailored to your target tasks (NLP classification, reasoning, multimodal).
+Risks and mitigations
+- Risk: “Confident wrong” from bad retrieval. Mitigation: retrieval fallbacks (lower temperature, ask for “I don’t know” when retrieval confidence low), multi‑retrieval consensus, and human‑in‑the‑loop verification.
+- Risk: Data leakage/PII exposure during fine‑tuning. Mitigation: scrub training data, legal review, and follow data handling policies.
+- Risk: Model brittleness after fine‑tuning. Mitigation: continuous evaluation, holdout tests with new statutes, and staged rollouts.
 
-If you want, tell me which of the next steps above to do (e.g., “summarize AutoPrompt and P‑tuning papers” or “export BibTeX for the 2023–2024 surveys”) and I’ll fetch and synthesize those details.
+Concrete conclusions and action plan (short)
+1. Start with RAG for most legal knowledge tasks—it buys rapid iteration, provenance, and easier updating. Instrument retrieval quality as a first‑order metric. (Supported by Legal RAG Bench findings: retrieval drives performance; Butler et al., Mar 2, 2026.)
+2. Run a structured evaluation: compare 2–3 embedders, 2 LLMs, and vary retrieval hyperparameters using a held‑out legal QA set (use Legal RAG Bench or Bar Exam/Housing Statute QA tasks as templates).
+3. If errors remain that are primarily reasoning / formatting (not retrieval), pilot fine‑tuning a small model on curated exemplars; consider hybridizing with RAG for evidence.
+4. For production, require provenance, configurable conservatism (decline on low confidence), and legal‑team signoff.
+
+Selected references (from your supplied material)
+- Butler et al., “Legal RAG Bench: an end‑to‑end benchmark for legal RAG,” March 2, 2026. (4,876 passages; 100 complex questions; found Kanon 2 Embedder provided largest gains; retrieval quality is main performance driver.)
+- “A Reasoning‑Focused Legal Retrieval Benchmark,” arXiv:2505.03970 / ACM paper (May 6, 2025 / Mar 25, 2025) — Bar Exam QA and Housing Statute QA benchmarks.
+- Harvard JOLT Digest, “RAG: towards a promising LLM architecture for legal work,” Apr 2, 2025.
+- arXiv “Incorporating Legal Structure in Retrieval‑Augmented Generation,” v1, May 4, 2025.
+- LegalBench‑RAG (arXiv:2408.10343, Aug 17, 2024) and related GitHub repos (ZeroEntropy-AI/legalbenchrag, Legal RAG Bench code released).
+
+If you want, I can:
+- Draft an experiment plan you can run (exact datasets, evaluation scripts, metric definitions) based on Legal RAG Bench and Bar Exam QA templates.
+- Produce a one‑page decision flowchart (when to use RAG / fine‑tune / hybrid) customized to a specific legal product (e.g., contract analysis vs. statutory QA).
+- Help benchmark candidate embedding models on your corpus (I’ll need sample documents and target queries).
+
+Which of those would you like next?
