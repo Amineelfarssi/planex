@@ -10,6 +10,7 @@ Methods:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 import time
@@ -69,8 +70,13 @@ class Agent:
     # ------------------------------------------------------------------
 
     async def plan(self, goal: str) -> PlanState:
+        import time as _time
+        t0 = _time.time()
         self.memory.load_memory()
+        print(f"[TIMING] load_memory: {_time.time() - t0:.2f}s")
+        t1 = _time.time()
         await self.knowledge.scan_sources_dir()
+        print(f"[TIMING] scan_sources_dir: {_time.time() - t1:.2f}s")
         return await self.planner.create_plan(goal)
 
     async def execute(
@@ -86,6 +92,113 @@ class Agent:
         plan = await self.plan(goal)
         synthesis = await self.execute(plan, on_task_update)
         return plan, synthesis
+
+    async def research(self, goal: str) -> AsyncIterator[AgentEvent]:
+        """Full research flow as an event stream: plan → execute → synthesize.
+
+        Yields AgentEvents so the frontend can show live progress.
+        """
+        import time as _time
+        from dataclasses import asdict
+
+        run_id = str(uuid.uuid4())[:8]
+        start_time = _time.time()
+
+        yield AgentEvent("run_start", {"runId": run_id})
+
+        # Step 1: Planning
+        yield AgentEvent("step_start", {"stepId": "planning", "name": "Creating research plan"})
+        plan = await self.plan(goal)
+        yield AgentEvent("state", {
+            "plan_id": plan.plan_id,
+            "plan_title": plan.plan_title,
+            "goal": plan.goal,
+            "status": plan.status,
+            "tasks": [
+                {"id": t.id, "title": t.title, "status": t.status,
+                 "tool_hint": t.tool_hint, "depends_on": t.depends_on}
+                for t in plan.tasks
+            ],
+        })
+        yield AgentEvent("step_end", {"stepId": "planning"})
+
+        # Step 2: Executing tasks
+        yield AgentEvent("step_start", {"stepId": "executing", "name": "Executing research tasks"})
+
+        groups = self.state.get_pending_groups(plan)
+        for group in groups:
+            for task in group:
+                yield AgentEvent("tool_start", {
+                    "toolCallId": task.id,
+                    "toolName": task.tool_hint or "agent",
+                })
+                yield AgentEvent("tool_args", {
+                    "toolCallId": task.id,
+                    "args": {"task": task.title, "description": task.description},
+                })
+
+            # Execute the group
+            if len(group) == 1:
+                await self.executor._execute_task(plan, group[0])
+            else:
+                await asyncio.gather(
+                    *[self.executor._execute_task(plan, t) for t in group]
+                )
+
+            for task in group:
+                yield AgentEvent("tool_end", {"toolCallId": task.id})
+                yield AgentEvent("tool_result", {
+                    "toolCallId": task.id,
+                    "content": task.result_summary[:300] if task.result_summary else "No result",
+                })
+                # Update task status in state snapshot
+                yield AgentEvent("state", {
+                    "plan_id": plan.plan_id,
+                    "tasks": [
+                        {"id": t.id, "title": t.title, "status": t.status,
+                         "tool_hint": t.tool_hint, "depends_on": t.depends_on,
+                         "result_summary": (t.result_summary or "")[:200]}
+                        for t in plan.tasks
+                    ],
+                })
+
+        yield AgentEvent("step_end", {"stepId": "executing"})
+
+        # Step 3: Synthesis (streaming)
+        yield AgentEvent("step_start", {"stepId": "synthesis", "name": "Synthesizing findings"})
+        synthesis = await self.executor._synthesize(plan)
+        self.state.set_synthesis(plan, synthesis)
+        self.state.set_status(plan, "completed")
+
+        # Auto-ingest synthesis
+        if synthesis and len(synthesis) > 100:
+            try:
+                await self.knowledge.ingest_text(
+                    text=synthesis, source=f"session:{plan.plan_id}",
+                    source_type="session_synthesis",
+                    ingested_by=f"session:{plan.plan_id}",
+                    title=plan.plan_title,
+                )
+            except Exception:
+                pass
+
+        # Stream synthesis as text deltas
+        for i in range(0, len(synthesis), 40):
+            yield AgentEvent("text_delta", {"delta": synthesis[i:i+40]})
+        yield AgentEvent("text_done", {"full": synthesis})
+
+        yield AgentEvent("step_end", {"stepId": "synthesis"})
+
+        # Post-processing
+        await self._post_session(plan, synthesis)
+
+        elapsed = _time.time() - start_time
+        yield AgentEvent("state", {
+            "status": "completed",
+            "plan_id": plan.plan_id,
+            "duration": round(elapsed, 1),
+        })
+        yield AgentEvent("run_end", {"runId": run_id})
 
     # ------------------------------------------------------------------
     # ReAct turn (follow-ups) — yields AgentEvents
@@ -116,15 +229,8 @@ class Agent:
 
         yield AgentEvent("run_start", {"runId": run_id})
 
-        # Step 1: Rewrite query
-        yield AgentEvent("step_start", {"stepId": "rewrite", "name": "Interpreting query"})
-        query = await self._rewrite_query(user_message, chat_history, session_context)
-        if query != user_message:
-            yield AgentEvent("rewrite", {"query": query})
-        yield AgentEvent("step_end", {"stepId": "rewrite"})
-
-        # Step 2: Assemble context
-        messages = self._build_context(query, chat_history, session_context)
+        # Assemble context — attention handles pronoun resolution natively
+        messages = self._build_context(user_message, chat_history, session_context)
 
         # Step 3: ReAct loop
         yield AgentEvent("step_start", {"stepId": "react", "name": "Thinking"})
@@ -233,10 +339,16 @@ class Agent:
         if len(message.split()) > 25:
             return message
 
+        # Only call the LLM rewriter when there are ambiguous pronouns to resolve
+        pronouns = {"it", "them", "they", "this", "that", "these", "those", "its", "their", "he", "she"}
+        words = set(message.lower().split())
+        if not words & pronouns:
+            return message
+
         prompt = (
             "Rewrite this message into a standalone question. "
             "Resolve ALL pronouns using the research context.\n"
-            "Return the original if already clear.\n\n"
+            "Return the original UNCHANGED if already clear.\n\n"
             + (f"RESEARCH CONTEXT:\n{session_context[:800]}\n\n" if session_context else "")
             + (f"CONVERSATION:\n" + "\n".join(f"{m['role']}: {m['content'][:100]}" for m in history[-4:]) + "\n\n" if history else "")
             + f"MESSAGE: {message}"
@@ -260,6 +372,10 @@ class Agent:
             "SCOPE: Research only — search, read, analyze, compare, synthesize.",
             "You have access to tools. Use them when you need current information.",
             "If you can answer from the provided context, do so without calling tools.",
+            "OFF-TOPIC: If the user's question is clearly unrelated to the current research session, "
+            "gently point out that this seems unrelated to the current research and suggest starting "
+            "a new session for a fresh topic. If they insist or ask again, answer it but prefix with "
+            "a brief note: '*(This is outside the current research scope.)*'",
         ]
         if memory_md.strip():
             system_parts.append(f"\n[Long-term memory]\n{memory_md[:600]}")

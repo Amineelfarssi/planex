@@ -88,35 +88,78 @@ async def unified_turn(req: TurnRequest):
     )
 
 
+class ResearchRequest(BaseModel):
+    goal: str
+
+
+@app.post("/api/research")
+async def research(req: ResearchRequest):
+    """Full research: plan → execute → synthesize. SSE stream of AG-UI events."""
+    from fastapi.responses import StreamingResponse
+    from core.react_loop import _to_sse, _event_sse
+    from ag_ui.core import EventType
+
+    agent = _get_agent()
+
+    async def stream():
+        text_started = False
+        msg_id = "synthesis"
+        async for event in agent.research(req.goal):
+            if event.kind == "text_delta" and not text_started:
+                yield _event_sse(EventType.TEXT_MESSAGE_START, {"messageId": msg_id, "role": "assistant"})
+                text_started = True
+            if event.kind == "text_done":
+                if text_started:
+                    yield _event_sse(EventType.TEXT_MESSAGE_END, {"messageId": msg_id})
+                continue
+            if event.kind == "state":
+                yield _event_sse(EventType.STATE_SNAPSHOT, {"snapshot": event.data})
+                continue
+            if event.kind == "tool_args":
+                args = event.data.get("args", {})
+                yield _event_sse(EventType.TOOL_CALL_ARGS, {
+                    "toolCallId": event.data.get("toolCallId", ""),
+                    "args": json.dumps(args) if isinstance(args, dict) else str(args),
+                })
+                continue
+            yield _to_sse(event)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
 # ---------------------------------------------------------------------------
 # Clarification
 # ---------------------------------------------------------------------------
 
-@app.post("/api/suggest-clarifications")
-async def suggest_clarifications(query: str = ""):
-    """LLM generates disambiguation options for ambiguous queries."""
+@app.post("/api/assess-goal")
+async def assess_goal(query: str = ""):
+    """LLM decides if a research goal is clear or needs clarification."""
     if not query:
-        return {"options": []}
+        return {"is_clear": True, "options": []}
 
-    from core.models import ClarificationRequest as ClarModel
+    from core.models import GoalAssessment
 
     agent = _get_agent()
     try:
-        result: ClarModel = await agent.llm.chat_parse(
+        result: GoalAssessment = await agent.llm.chat_parse(
             messages=[{
                 "role": "user",
                 "content": (
-                    "The user submitted this research query which may be ambiguous. "
-                    "Generate 3-4 specific research directions.\n\n"
-                    f"User query: \"{query}\""
+                    "Assess this research goal. Is it specific enough to research directly, "
+                    "or is it ambiguous and needs the user to pick a direction?\n\n"
+                    "Clear goals: 'Compare RAG vs fine-tuning for legal AI', "
+                    "'What are GEPA transformer architectures?'\n"
+                    "Ambiguous goals: 'AI trends', 'transformers', 'legal tech'\n\n"
+                    "If ambiguous, generate 3-4 specific research directions as options.\n\n"
+                    f"Goal: \"{query}\""
                 ),
             }],
-            response_model=ClarModel,
+            response_model=GoalAssessment,
             tier="fast",
         )
-        return {"options": [o.model_dump() for o in result.options]}
+        return {"is_clear": result.is_clear, "options": [o.model_dump() for o in result.options]}
     except Exception:
-        return {"options": []}
+        return {"is_clear": True, "options": []}
 
 
 # ---------------------------------------------------------------------------

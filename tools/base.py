@@ -28,13 +28,12 @@ class Tool(ABC):
     async def execute(self, **kwargs: Any) -> ToolResult: ...
 
     def openai_schema(self) -> dict:
-        """Return Responses API tool schema (flat, with strict)."""
+        """Return Responses API tool schema (flat format)."""
         return {
             "type": "function",
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
-            "strict": True,
         }
 
 
@@ -69,7 +68,7 @@ class ToolRegistry:
         import tools as pkg
 
         for _, module_name, _ in pkgutil.iter_modules(pkg.__path__):
-            if module_name == "base":
+            if module_name == "base" or module_name.startswith("_"):
                 continue
             mod = importlib.import_module(f"tools.{module_name}")
             for _, obj in inspect.getmembers(mod, inspect.isclass):

@@ -24,29 +24,34 @@ An autonomous AI agent that breaks complex research goals into plans, executes t
 
 ## How It Works
 
-Every user message — whether a new research goal or a follow-up question — goes through the same **unified ReAct loop**:
-
 ```mermaid
 flowchart TD
-    A[User Message] --> B[Query Rewriter]
-    B -->|Resolves pronouns<br/>using session context| C[ReAct Loop]
-    C --> D{LLM Decision}
-    D -->|Needs info| E[Tool Call]
-    E --> F[web_search / read_url /<br/>knowledge_search / local_search]
-    F -->|Result| C
-    D -->|Can answer| G[Stream Response]
-    G -->|AG-UI Events| H[Frontend]
-    G -->|Auto-ingest| I[Knowledge Base]
-    G -->|Save| J[Session + Memory]
+    A[User Message] --> B{Goal Assessment}
+    B -->|Ambiguous| C[Clarification Cards]
+    C -->|User picks| D
+    B -->|Clear| D[Planner — STRATEGIC LLM]
+    D --> E[Task Plan]
+    E --> F[Parallel Executor]
+    F --> G[ddg_search / read_url /<br/>knowledge_search / local_search]
+    G -->|Results| F
+    F --> H[Synthesizer]
+    H -->|AG-UI Events| I[Frontend]
+    H -->|Auto-ingest| J[Knowledge Base]
+
+    K[Follow-up Question] --> L[ReAct Loop — SMART LLM]
+    L --> M{LLM Decision}
+    M -->|Needs info| G
+    M -->|Can answer| N[Stream Response]
+    N -->|AG-UI Events| I
 
     style A fill:#DA7756,color:white
-    style C fill:#5B9BD5,color:white
-    style I fill:#6BC76B,color:white
+    style D fill:#5B9BD5,color:white
+    style J fill:#6BC76B,color:white
 ```
 
-The agent decides on each turn whether to search the web, query the knowledge base, read a URL, or answer directly from context.
+**Initial research:** An LLM-based goal assessor checks if the query is clear or ambiguous. Ambiguous queries show clarification cards for the user to pick a direction. Clear goals go to the **Planner** (STRATEGIC LLM with high reasoning) which produces a visible task plan. Tasks execute in parallel with real tools, then synthesize into a report.
 
-For initial research, a **Planner** (STRATEGIC LLM) produces a visible task checklist the user can review before execution. Follow-up questions go through the ReAct loop directly — full tool access without planning overhead.
+**Follow-ups:** Go through a **ReAct loop** — the model has full tool access and decides on each turn whether to search, read, or answer from context. The attention mechanism handles pronoun resolution natively from the conversation history — no separate query rewriter needed.
 
 ## Key Features
 
@@ -56,11 +61,11 @@ For initial research, a **Planner** (STRATEGIC LLM) produces a visible task chec
 
 3. **Three-Tier LLM Strategy** — cheap model for summaries (FAST), capable model for tool dispatch (SMART), reasoning model for planning (STRATEGIC). Each tier independently configurable.
 
-4. **Structured Output Everywhere** — all LLM calls returning structured data use Pydantic models with OpenAI's native `client.beta.chat.completions.parse()`. Zero parsing failures.
+4. **Structured Output Everywhere** — all LLM calls returning structured data use Pydantic models with OpenAI's `client.responses.parse(text_format=Model)`. Zero parsing failures.
 
 5. **Persistent Knowledge Base** — LanceDB vector store that grows silently. Session syntheses auto-ingest. Users can upload files, paste URLs, or drop documents. Every chunk carries structured metadata (`KBChunkMetadata`).
 
-6. **Session-Aware Follow-ups** — query rewriter resolves "them", "it", "this" using the session's research context before the LLM sees the message. Follow-ups have full tool access.
+6. **Session-Aware Follow-ups** — the full session context (synthesis, chat history, memory) is assembled into the LLM context. Attention handles pronoun resolution natively. Follow-ups have full tool access. Off-topic questions are flagged gracefully.
 
 7. **Three-Layer Memory** — short-term (conversation), long-term (`MEMORY.md` with extracted learnings), and knowledge (LanceDB). Memory flush before context compaction prevents amnesia.
 
@@ -111,9 +116,9 @@ echo "OPENAI_API_KEY=sk-your-key-here" > ~/.planex/.env
 |------|-------|-----------|---------|
 | FAST | gpt-5-nano | auto | Rewriting, routing, summaries, metadata extraction |
 | SMART | gpt-5-mini | auto | Tool dispatch, synthesis, follow-up responses |
-| STRATEGIC | gpt-5.1 | `high` | Planning and decomposition |
+| STRATEGIC | gpt-5.1 | `medium` | Planning and decomposition |
 
-> **Note:** `gpt-5.1` defaults to `reasoning_effort: none`. We explicitly set `high` — without this, planning quality drops significantly.
+> **Note:** `gpt-5.1` defaults to `reasoning_effort: none`. We explicitly set the reasoning effort — without this, planning quality drops significantly.
 
 ### Structured Output Models
 
@@ -142,13 +147,15 @@ class KBChunkMetadata(BaseModel):
 
 | Tool | Source | When Used |
 |------|--------|-----------|
-| `web_search` | OpenAI Responses API | Current info, no extra API key |
+| `ddg_search` | DuckDuckGo (`ddgs`) | Free web search — returns structured URLs, titles, snippets |
 | `read_url` | httpx + trafilatura | Deep-read articles from search results |
 | `knowledge_search` | LanceDB vectors | Find past research and ingested docs |
-| `local_search` | grep (ripgrep-style) | Text search over workspace files |
+| `local_search` | grep/rg | Text search over workspace files |
 | `ingest_documents` | LanceDB | Add files to KB |
 | `read_file` / `write_file` | filesystem | Local file I/O |
 | `get_current_time` | datetime | Time as tool, not in system prompt (preserves caching) |
+
+> **Native web search:** OpenAI's `{"type": "web_search"}` is injected into every LLM call automatically. The model can search the web server-side whenever it needs to — results appear as inline text with citations. This complements `ddg_search` which returns structured URLs for the agent to `read_url`.
 
 ### Event Flow
 
@@ -161,16 +168,17 @@ sequenceDiagram
     participant T as Tool
 
     U->>F: "Research GEPA architecture"
-    F->>B: POST /api/turn (SSE)
-    B->>L: Rewrite query (FAST)
-    B-->>F: STEP_STARTED: rewriting
-    B->>L: ReAct turn (SMART + tools)
-    L->>B: tool_call: web_search
+    F->>B: POST /api/research (SSE)
+    B->>L: Assess goal (FAST)
+    B->>L: Create plan (STRATEGIC)
+    B-->>F: STATE_SNAPSHOT: tasks
+    B->>L: Execute task (SMART + tools)
+    L->>B: tool_call: ddg_search
     B-->>F: TOOL_CALL_START
-    B->>T: web_search("GEPA architecture")
+    B->>T: ddg_search("GEPA architecture")
     T->>B: results
     B-->>F: TOOL_CALL_RESULT
-    B->>L: ReAct turn 2 (with results)
+    B->>L: Execute task 2
     L->>B: tool_call: read_url
     B-->>F: TOOL_CALL_START
     B->>T: read_url(url)
@@ -230,7 +238,7 @@ planex/
 │   ├── memory.py            # MEMORY.md + daily notes + flush
 │   ├── state.py             # Session persistence
 │   └── context.py           # Context assembly pipeline
-├── tools/                   # web_search, read_url, local_search, knowledge_search, ...
+├── tools/                   # ddg_search, read_url, local_search, knowledge_search, ...
 ├── dashboard/app.py         # FastAPI: /api/turn (SSE), REST endpoints
 ├── frontend/                # React + Vite + Tailwind + Zustand
 ├── desktop.py               # Native macOS app (pywebview)
@@ -242,12 +250,14 @@ planex/
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | No agent framework | Custom ReAct loop | Assignment requirement; cleaner to explain |
-| OpenAI web search | Responses API | Zero extra API keys — uses existing OpenAI key |
+| DuckDuckGo + native web search | `ddgs` + Responses API | Free structured URLs + native LLM web search, no extra keys |
 | AG-UI protocol | `ag-ui-protocol` package | Open standard, typed events, not a framework |
 | Structured output | Pydantic + `parse()` | Type-safe, zero parsing failures |
 | KB as invisible tool | Not a UI tab | Grows silently, no management overhead |
-| gpt-5.1 reasoning | Explicit `high` | Defaults to `none` — dramatic quality difference |
-| Single ReAct path | No chat vs research split | Simpler, every message can use tools |
+| gpt-5.1 reasoning | Explicit `medium` | Defaults to `none` — dramatic quality difference |
+| Hybrid architecture | Planner + ReAct | Initial research gets visible plan; follow-ups go direct |
+| No query rewriter | Attention handles it | Pronouns resolved natively from context — zero added latency |
+| Goal assessment | LLM-based disambiguation | Ambiguous queries get clarification cards before planning |
 
 ## License
 

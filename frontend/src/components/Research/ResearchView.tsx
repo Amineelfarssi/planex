@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { fetchSession, fetchSessions, chat, chatStream, sendTurn, fetchGreeting, suggestClarifications } from '../../api/client'
+import { fetchSession, fetchSessions, chat, chatStream, sendTurn, sendResearch, fetchGreeting, assessGoal } from '../../api/client'
 import type { AGUIEvent } from '../../api/client'
 import { PlanView } from './PlanView'
 import { LogViewer } from './LogViewer'
@@ -50,7 +50,9 @@ export function ResearchView() {
 
   // Load chat history from session when switching
   // Don't clear synthesis if we just finished a live research (reloadAfterResearch sets the session)
-  const justFinishedRef = useRef(false)
+  // justFinishedRef removed — prevPlanIdRef handles session switch detection
+
+  const prevPlanIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (selectedSession?.chat_history) {
@@ -62,13 +64,14 @@ export function ResearchView() {
     }
     setChatInput('')
 
-    // Only clear live state if this is a USER-initiated session switch, not a post-research reload
-    if (justFinishedRef.current) {
-      justFinishedRef.current = false
-      // Don't clear — keep the live synthesis visible
-    } else {
+    // Only clear live state on USER-initiated session switch (clicking a different session)
+    const isNewSession = prevPlanIdRef.current !== null && prevPlanIdRef.current !== selectedSession?.plan_id
+    prevPlanIdRef.current = selectedSession?.plan_id || null
+
+    if (isNewSession) {
       setWsLogs([])
       setSynthesis('')
+      setToolActivity([])
     }
   }, [selectedSession?.plan_id])
 
@@ -76,15 +79,16 @@ export function ResearchView() {
     const query = overrideGoal || goal
     if (!query.trim() || loading) return
 
-    // For short/ambiguous queries, offer clarification first
-    if (!overrideGoal && query.split(' ').length <= 5) {
+    // LLM decides if the goal needs clarification
+    // Skip if: user picked a card (overrideGoal), or user clicked "Search as-is" (dismiss=true)
+    if (!overrideGoal) {
       try {
         setLoading(true)
-        const result = await suggestClarifications(query)
-        if (result.options && result.options.length > 1) {
+        const result = await assessGoal(query)
+        if (!result.is_clear && result.options?.length > 1) {
           setClarifications(result.options)
           setLoading(false)
-          return // Show cards, don't start research yet
+          return // Show cards, user picks a direction or edits query
         }
       } catch {} finally {
         setLoading(false)
@@ -99,34 +103,105 @@ export function ResearchView() {
     setSelectedSession(null)
     if (overrideGoal) setGoal(overrideGoal)
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//localhost:8000/ws`)
+    try {
+      await sendResearch(query, (event: AGUIEvent) => {
+        try { switch (event.type) {
+          case 'STATE_SNAPSHOT': {
+            // Data is under event.snapshot (wrapped by SSE layer)
+            const snap = event.snapshot || event
+            if (snap?.tasks) {
+              setWsLogs(prev => {
+                const taskLog = {
+                  type: 'plan', content: '', output: '',
+                  tasks: snap.tasks,
+                  plan_title: snap.plan_title || prev.find((l: any) => l.type === 'plan')?.plan_title,
+                  goal: snap.goal || prev.find((l: any) => l.type === 'plan')?.goal,
+                  plan_id: snap.plan_id || prev.find((l: any) => l.type === 'plan')?.plan_id,
+                  status: snap.status,
+                }
+                const idx = prev.findIndex(l => l.type === 'plan')
+                if (idx >= 0) {
+                  const updated = [...prev]
+                  updated[idx] = taskLog
+                  return updated
+                }
+                return [...prev, taskLog]
+              })
+            }
+            if (snap?.status === 'completed' && snap?.plan_id) {
+              setLoading(false)
+              setActivePlanId(snap.plan_id)
+              localStorage.setItem(ACTIVE_SESSION_KEY, snap.plan_id)
+              // Reload session in background — don't clear live state
+              fetchSession(snap.plan_id).then(session => {
+                if (session?.plan_id) {
+                  setSelectedSession(session)
+                  setDocPanelOpen(true)
+                  // Refresh sidebar
+                  fetchSessions().then(s => {
+                    s.sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
+                    setSessions(s)
+                  }).catch(() => {})
+                }
+              }).catch(() => {})
+            }
+            break
+          }
 
-    ws.onopen = () => {
-      ws.send(`start ${JSON.stringify({ task: query })}`)
+          case 'TOOL_CALL_START':
+            setToolActivity(prev => [...prev, { name: event.toolName || '?' }])
+            break
+
+          case 'TOOL_CALL_ARGS':
+            setToolActivity(prev => {
+              try {
+                const updated = [...prev]
+                if (updated.length > 0) {
+                  let args: any = {}
+                  try { args = typeof event.args === 'string' ? JSON.parse(event.args) : (event.args || {}) } catch { args = {} }
+                  const summary = args.task || args.query || args.description || ''
+                  updated[updated.length - 1].summary = String(summary).slice(0, 80)
+                }
+                return updated
+              } catch { return prev }
+            })
+            break
+
+          case 'TOOL_CALL_END':
+            // Keep activity visible
+            break
+
+          case 'TOOL_CALL_RESULT':
+            setToolActivity(prev => {
+              const updated = [...prev]
+              if (updated.length > 0) {
+                const last = updated[updated.length - 1]
+                if (!last.summary) last.summary = String(event.content || '').slice(0, 100)
+              }
+              return updated
+            })
+            break
+
+          case 'TEXT_MESSAGE_CONTENT':
+            setSynthesis(prev => prev + (event.delta || ''))
+            break
+
+          case 'STEP_STARTED':
+            setWsLogs(prev => [...prev, { type: 'logs', content: `${event.name || event.stepId}...`, output: '' }])
+            break
+
+          case 'STEP_FINISHED':
+            break
+
+          case 'RUN_FINISHED':
+            setLoading(false)
+            setToolActivity([])
+            break
+        } } catch (e) { console.error('Event handler error:', e) }
+      })
+    } catch {
+      setLoading(false)
     }
-
-    ws.onmessage = (event) => {
-      if (event.data === 'pong') return
-      try {
-        const data = JSON.parse(event.data)
-        setWsLogs(prev => [...prev, data])
-
-        if (data.type === 'report') {
-          setSynthesis(prev => prev + data.output)
-        } else if (data.type === 'report_complete') {
-          setSynthesis(data.output)
-        } else if (data.type === 'path') {
-          setLoading(false)
-          ws.close()
-          // Reload session from backend to get the persisted plan
-          reloadAfterResearch()
-        }
-      } catch {}
-    }
-
-    ws.onerror = () => setLoading(false)
-    ws.onclose = () => setLoading(false)
   }
 
   const reloadAfterResearch = async () => {
@@ -231,12 +306,16 @@ export function ResearchView() {
 
             case 'TOOL_CALL_ARGS':
               setToolActivity(prev => {
-                const updated = [...prev]
-                if (updated.length > 0) {
-                  const args = event.args ? JSON.parse(event.args) : {}
-                  updated[updated.length - 1].summary = Object.values(args).join(' ').slice(0, 80)
-                }
-                return updated
+                try {
+                  const updated = [...prev]
+                  if (updated.length > 0) {
+                    let args: any = {}
+                    try { args = event.args ? JSON.parse(event.args) : {} } catch { args = {} }
+                    const summary = args.query || args.task || args.description || ''
+                    updated[updated.length - 1].summary = String(summary).slice(0, 80)
+                  }
+                  return updated
+                } catch { return prev }
               })
               break
 
@@ -281,44 +360,17 @@ export function ResearchView() {
 
   const resumeSession = async () => {
     if (!selectedSession) return
-    setLoading(true)
-    setWsLogs([])
-    setSynthesis('')
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//localhost:8000/ws`)
-
-    ws.onopen = () => {
-      ws.send(`start ${JSON.stringify({ task: selectedSession.goal, resume: selectedSession.plan_id })}`)
-    }
-
-    ws.onmessage = (event) => {
-      if (event.data === 'pong') return
-      try {
-        const data = JSON.parse(event.data)
-        setWsLogs(prev => [...prev, data])
-        if (data.type === 'report') setSynthesis(prev => prev + data.output)
-        else if (data.type === 'report_complete') setSynthesis(data.output)
-        else if (data.type === 'path') {
-          setLoading(false)
-          ws.close()
-          justFinishedRef.current = true
-          reloadAfterResearch()
-          // Auto-open the document panel when research completes
-          setDocPanelOpen(true)
-        }
-      } catch {}
-    }
-
-    ws.onerror = () => setLoading(false)
-    ws.onclose = () => setLoading(false)
+    // Resume by re-running the same goal
+    setGoal(selectedSession.goal)
+    startResearch(selectedSession.goal)
   }
 
   // Determine what to show
   const plan = selectedSession
+  const livePlan = wsLogs.find(l => l.type === 'plan') as any
   const logs = wsLogs.filter(m => m.type === 'logs')
   const hasPendingTasks = plan?.tasks.some(t => t.status === 'pending')
-  const hasLiveResults = synthesis || logs.length > 0
+  const hasLiveResults = synthesis || logs.length > 0 || livePlan
 
   const showHero = !plan && !hasLiveResults && !loading
 
@@ -452,9 +504,29 @@ export function ResearchView() {
           }}
           onDismiss={() => {
             setClarifications(null)
-            startResearch(goal) // use original query as-is
+            startResearch(goal) // pass as override to skip assessment
           }}
         />
+      )}
+
+      {/* Live plan — during active research (before session is saved) */}
+      {!plan && livePlan && (
+        <div>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold">{livePlan.plan_title || 'Researching...'}</h1>
+              <p className="text-sm text-gray-400 dark:text-planex-dimmed mt-1">{livePlan.goal || goal}</p>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+              {loading ? 'in progress' : livePlan.status || 'planning'}
+            </span>
+          </div>
+          {livePlan.tasks && (
+            <div className="mt-4">
+              <PlanView tasks={livePlan.tasks} />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Selected/active session */}

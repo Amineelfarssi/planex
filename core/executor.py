@@ -164,7 +164,7 @@ class Executor:
                         all_results.append(result.data)
 
                         # Auto-ingest web content into KB
-                        if tc.name in ("read_url", "web_search") and len(result.data) > 100:
+                        if tc.name in ("read_url", "ddg_search") and len(result.data) > 100:
                             try:
                                 await self._kb.ingest_text(
                                     text=result.data,

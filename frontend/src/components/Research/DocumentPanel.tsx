@@ -15,13 +15,15 @@ export function DocumentPanel({ onClose }: { onClose: () => void }) {
   const handleDownload = () => {
     const title = selectedSession?.plan_title || 'research'
     const filename = `${title.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 50)}.md`
-    const blob = new Blob([synthesis], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
+
+    // Use data URI instead of blob URL — pywebview intercepts blob URLs
+    const dataUri = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(synthesis)
     const a = document.createElement('a')
-    a.href = url
+    a.href = dataUri
     a.download = filename
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(a)
   }
 
   const handleCopy = async () => {

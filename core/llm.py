@@ -121,7 +121,7 @@ _TIER_DEFAULT = {
 _TIER_REASONING = {
     "fast": None,
     "smart": None,
-    "strategic": "high",
+    "strategic": "medium",
 }
 
 MAX_RETRIES = 3
@@ -160,13 +160,24 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict] | None = None,
         response_format: dict | None = None,
         tier: Tier = "smart",
+        web_search: bool = True,
     ) -> LLMResponse:
-        """Call LLM via Responses API. Returns text and/or tool calls."""
+        """Call LLM via Responses API. Returns text and/or tool calls.
+
+        web_search: inject OpenAI's native web_search tool so the model
+        can search the internet server-side when it decides to. This is
+        transparent — results appear as inline text with citation annotations.
+        """
         model = self._model(tier)
         kwargs: dict[str, Any] = {"model": model, "input": messages}
 
-        if tools:
-            kwargs["tools"] = tools
+        # Merge custom tools + native web_search
+        all_tools = list(tools) if tools else []
+        if web_search:
+            all_tools.append({"type": "web_search"})
+        if all_tools:
+            kwargs["tools"] = all_tools
+
         if response_format:
             kwargs["text"] = {"format": response_format}
 
@@ -193,12 +204,12 @@ class OpenAIProvider(LLMProvider):
 
         for item in resp.output:
             if item.type == "message":
-                # Text response
+                # Text response (may include citation annotations from native web search)
                 for block in item.content:
                     if hasattr(block, 'text'):
                         content = (content or "") + block.text
             elif item.type == "function_call":
-                # Tool call
+                # Custom tool call (our tools like ddg_search, read_url, etc.)
                 try:
                     args = json.loads(item.arguments) if isinstance(item.arguments, str) else item.arguments
                 except (json.JSONDecodeError, TypeError):
@@ -208,6 +219,11 @@ class OpenAIProvider(LLMProvider):
                     name=item.name,
                     arguments=args,
                 ))
+            elif item.type == "web_search_call":
+                # Native web search — results are folded into the text message
+                # with citation annotations. Nothing to dispatch — just let
+                # the text content (with citations) flow through.
+                pass
 
         # Fallback: try output_text for simple responses
         if content is None and hasattr(resp, 'output_text') and resp.output_text:
@@ -264,12 +280,17 @@ class OpenAIProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
         tier: Tier = "smart",
+        web_search: bool = True,
     ) -> AsyncIterator[str]:
         """Stream text tokens via Responses API."""
         model = self._model(tier)
         kwargs: dict[str, Any] = {"model": model, "input": messages, "stream": True}
-        if tools:
-            kwargs["tools"] = tools
+
+        all_tools = list(tools) if tools else []
+        if web_search:
+            all_tools.append({"type": "web_search"})
+        if all_tools:
+            kwargs["tools"] = all_tools
 
         stream = await self._client.responses.create(**kwargs)
         async for event in stream:

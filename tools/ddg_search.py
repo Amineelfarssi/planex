@@ -36,12 +36,17 @@ Search the web via DuckDuckGo. Returns structured results with titles, URLs, and
 Free, no API key required.
 
 When to use:
-- Find source URLs for a topic
+- Find source URLs to then read with read_url
 - Quick web search when you need links, not deep analysis
-- Complement web_search (OpenAI) which gives deeper answers but less structured URLs
+- Use ALONGSIDE web_search: ddg_search finds URLs, web_search gives deep answers
+- When you need multiple specific URLs to read in detail
+
+When NOT to use:
+- Question is about ingested documents (use knowledge_search)
+- You need deep analysis with citations (use web_search instead)
 
 Parameters:
-- query: search terms
+- query: search terms (be specific)
 - max_results: how many results (default 5)
 """
 

@@ -30,7 +30,7 @@ export function PlanView({ tasks }: { tasks: Task[] }) {
                 </span>
               )}
             </div>
-            {task.depends_on.length > 0 && (
+            {task.depends_on?.length > 0 && (
               <span className="text-[10px] text-planex-dimmed">
                 after {task.depends_on.join(', ')}
               </span>

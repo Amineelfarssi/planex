@@ -20,6 +20,15 @@ class IntentClassification(BaseModel):
     reason: str = Field(description="One sentence explaining why this intent was chosen")
 
 
+class GoalAssessment(BaseModel):
+    """Assess whether a research goal is clear enough to plan, or needs clarification."""
+    is_clear: bool = Field(description="True if the goal is specific enough to research directly")
+    options: list[ClarificationOption] = Field(
+        default_factory=list,
+        description="If is_clear=false, 3-4 specific research directions the user can pick from. Empty if is_clear=true.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Query Rewriter
 # ---------------------------------------------------------------------------

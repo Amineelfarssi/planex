@@ -68,6 +68,44 @@ export const sendTurn = async (
   }
 }
 
+// ---------------------------------------------------------------------------
+// Research — plan + execute + synthesize (SSE)
+// ---------------------------------------------------------------------------
+
+export const sendResearch = async (
+  goal: string,
+  onEvent: (event: AGUIEvent) => void,
+): Promise<void> => {
+  const resp = await fetch('/api/research', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal }),
+  })
+
+  const reader = resp.body?.getReader()
+  if (!reader) return
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const event = JSON.parse(line.slice(6))
+        onEvent(event)
+      } catch {}
+    }
+  }
+}
+
 // Legacy (kept for backward compat)
 export const chatStream = async (
   messages: { role: string; content: string }[],
@@ -123,7 +161,8 @@ export const fetchGreeting = () => api.get('/greeting').then(r => r.data as {
   period: string, name: string, date: string, time: string
 })
 
-export const suggestClarifications = (query: string) =>
-  api.post('/suggest-clarifications', null, { params: { query } }).then(r => r.data as {
+export const assessGoal = (query: string) =>
+  api.post('/assess-goal', null, { params: { query } }).then(r => r.data as {
+    is_clear: boolean,
     options: { label: string, description: string, query: string }[]
   })
