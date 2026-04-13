@@ -17,7 +17,7 @@ export function ResearchView() {
   const { selectedSession, setSelectedSession, setSessions, setDocPanelOpen } = useAppStore()
   const [goal, setGoal] = useState('')
   const [loading, setLoading] = useState(false)
-  const [wsLogs, setWsLogs] = useState<{type: string, content: string, output: string}[]>([])
+  const [wsLogs, setWsLogs] = useState<{type: string, content: string, output: string, tasks?: any[], plan_title?: string, goal?: string, plan_id?: string, status?: string}[]>([])
   const [synthesis, setSynthesis] = useState('')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
 
