@@ -37,3 +37,6 @@ build/
 *.so
 *.dylib
 Planex.app/
+
+# Core dumps
+core.*

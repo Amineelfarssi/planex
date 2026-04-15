@@ -11,7 +11,10 @@ Endpoints:
   GET  /api/reports            — list sessions
   GET  /api/reports/{id}       — session details
   GET  /api/greeting           — time-aware greeting
-  GET  /api/health             — health check
+  GET  /api/health             — health check (provider info + needs_setup)
+  GET  /api/config             — current config (masked secrets)
+  POST /api/config             — save config, reload provider
+  POST /api/config/test        — test connection without saving
   GET  /api/knowledge/stats    — KB statistics
   POST /api/knowledge/search   — search KB
 """
@@ -273,7 +276,56 @@ async def ingest_text_endpoint(req: IngestTextRequest):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "planex", "version": "0.1.0"}
+    from core.config import get_health
+    return get_health()
+
+
+# ---------------------------------------------------------------------------
+# Config — settings UI
+# ---------------------------------------------------------------------------
+
+class ConfigUpdate(BaseModel):
+    PLANEX_PROVIDER: str = ""
+    OPENAI_API_KEY: str = ""
+    AWS_REGION: str = ""
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    PLANEX_USER_NAME: str = ""
+    PLANEX_FAST_MODEL: str = ""
+    PLANEX_SMART_MODEL: str = ""
+    PLANEX_STRATEGIC_MODEL: str = ""
+    PLANEX_EMBEDDING_MODEL: str = ""
+
+
+@app.get("/api/config")
+async def get_config():
+    from core.config import get_config as _get_config
+    return _get_config()
+
+
+@app.post("/api/config")
+async def save_config(req: ConfigUpdate):
+    from core.config import save_config as _save, get_health
+    global _agent
+    _save(req.model_dump())
+    _agent = None  # Force re-creation with new config
+    return get_health()
+
+
+class TestConfigRequest(BaseModel):
+    provider: str
+    OPENAI_API_KEY: str = ""
+    AWS_REGION: str = ""
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+
+
+@app.post("/api/config/test")
+async def test_config(req: TestConfigRequest):
+    from core.config import test_connection
+    creds = req.model_dump()
+    provider = creds.pop("provider")
+    return await test_connection(provider, **creds)
 
 
 @app.get("/api/status")

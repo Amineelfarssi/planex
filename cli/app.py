@@ -39,7 +39,7 @@ def serve_cmd(port: int):
     """Start the web API server."""
     import uvicorn
     from dashboard.app import app as fastapi_app
-    click.echo(f"Planex API on http://localhost:{port}")
+    click.echo(f"Planex API on http://0.0.0.0:{port}")
     click.echo(f"API docs: http://localhost:{port}/docs")
     uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
 

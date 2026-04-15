@@ -1,7 +1,12 @@
 import axios from 'axios'
 import type { SessionSummary, PlanState, KBStats, KBSearchResult } from '../types'
 
-const api = axios.create({ baseURL: '/api' })
+// Derive API base from page origin — works behind reverse proxies (e.g. SageMaker Studio)
+// Page URL like https://host/jupyter/default/proxy/8000/ → apiBase = /jupyter/default/proxy/8000/api
+const _pathBase = window.location.pathname.replace(/\/+$/, '')
+const apiBase = _pathBase + '/api'
+
+const api = axios.create({ baseURL: apiBase })
 
 export const fetchStatus = () => api.get('/status').then(r => r.data)
 export const fetchSessions = () => api.get<SessionSummary[]>('/reports').then(r => r.data)
@@ -38,7 +43,7 @@ export const sendTurn = async (
   sessionId: string | undefined,
   onEvent: (event: AGUIEvent) => void,
 ): Promise<void> => {
-  const resp = await fetch('/api/turn', {
+  const resp = await fetch(apiBase + '/turn', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, chat_history: chatHistory, session_id: sessionId }),
@@ -76,7 +81,7 @@ export const sendResearch = async (
   goal: string,
   onEvent: (event: AGUIEvent) => void,
 ): Promise<void> => {
-  const resp = await fetch('/api/research', {
+  const resp = await fetch(apiBase + '/research', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ goal }),
@@ -113,7 +118,7 @@ export const chatStream = async (
   onToken: (text: string) => void,
   onRewrite?: (query: string) => void,
 ): Promise<string> => {
-  const resp = await fetch('/api/chat/stream', {
+  const resp = await fetch(apiBase + '/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, research_id: researchId }),
@@ -166,3 +171,50 @@ export const assessGoal = (query: string) =>
     is_clear: boolean,
     options: { label: string, description: string, query: string }[]
   })
+
+// ---------------------------------------------------------------------------
+// Health + Config (Settings UI)
+// ---------------------------------------------------------------------------
+
+export interface HealthStatus {
+  status: string
+  service: string
+  version: string
+  provider: string
+  provider_name: string
+  models: Record<string, string>
+  needs_setup: boolean
+  auto_detected: { provider: string; reason: string }
+}
+
+export interface ConfigData {
+  PLANEX_PROVIDER: string
+  OPENAI_API_KEY: string
+  AWS_REGION: string
+  AWS_ACCESS_KEY_ID: string
+  AWS_SECRET_ACCESS_KEY: string
+  PLANEX_USER_NAME: string
+  PLANEX_FAST_MODEL: string
+  PLANEX_SMART_MODEL: string
+  PLANEX_STRATEGIC_MODEL: string
+  PLANEX_EMBEDDING_MODEL: string
+  _detected?: { provider: string; reason: string }
+}
+
+export interface TestResult {
+  ok: boolean
+  error?: string
+  response?: string
+}
+
+export const fetchHealth = () =>
+  api.get<HealthStatus>('/health').then(r => r.data)
+
+export const fetchConfig = () =>
+  api.get<ConfigData>('/config').then(r => r.data)
+
+export const saveConfig = (config: Partial<ConfigData>) =>
+  api.post<HealthStatus>('/config', config).then(r => r.data)
+
+export const testConfig = (data: { provider: string } & Record<string, string>) =>
+  api.post<TestResult>('/config/test', data).then(r => r.data)

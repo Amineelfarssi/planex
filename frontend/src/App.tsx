@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAppStore } from './stores/appStore'
-import { fetchSessions, fetchKBStats, uploadFile, ingestUrl, ingestText } from './api/client'
+import { fetchSessions, fetchKBStats, uploadFile, ingestUrl, ingestText, fetchHealth } from './api/client'
 import { SessionList } from './components/Sidebar/SessionList'
 import { ResearchView } from './components/Research/ResearchView'
 import { DocumentPanel } from './components/Research/DocumentPanel'
 import { MemoryView } from './components/Memory/MemoryView'
 import { StatusBar } from './components/StatusBar'
+import { SetupModal } from './components/SetupModal'
 import { ToastContainer, showToast } from './components/common/Toast'
 import {
   BookOpen, Sun, Moon, FileText, Menu, X, Plus, Brain, Upload,
@@ -16,6 +17,7 @@ export default function App() {
   const {
     view, setView, setSessions, setKBStats, theme, toggleTheme,
     docPanelOpen, setDocPanelOpen, selectedSession,
+    setProviderStatus, setSettingsOpen,
   } = useAppStore()
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -33,6 +35,10 @@ export default function App() {
       setSessions(s)
     }).catch(() => {})
     fetchKBStats().then(setKBStats).catch(() => {})
+    fetchHealth().then(h => {
+      setProviderStatus(h)
+      if (h.needs_setup) setSettingsOpen(true)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -265,6 +271,7 @@ export default function App() {
       </div>
 
       <StatusBar />
+      <SetupModal />
       <ToastContainer />
     </div>
   )

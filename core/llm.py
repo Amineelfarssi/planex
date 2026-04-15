@@ -100,6 +100,16 @@ class LLMProvider(ABC):
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
+    @abstractmethod
+    def format_tool_call(self, call_id: str, name: str, arguments: dict) -> dict:
+        """Format a tool call into a message dict the provider understands."""
+        ...
+
+    @abstractmethod
+    def format_tool_result(self, call_id: str, output: str) -> dict:
+        """Format a tool result into a message dict the provider understands."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # OpenAI Responses API implementation
@@ -151,6 +161,14 @@ class OpenAIProvider(LLMProvider):
                 completion_tokens=getattr(resp.usage, 'output_tokens', 0) or 0,
             )
         return TokenUsage()
+
+    # ---- message format helpers ------------------------------------------------
+
+    def format_tool_call(self, call_id: str, name: str, arguments: dict) -> dict:
+        return {"type": "function_call", "call_id": call_id, "name": name, "arguments": json.dumps(arguments)}
+
+    def format_tool_result(self, call_id: str, output: str) -> dict:
+        return {"type": "function_call_output", "call_id": call_id, "output": output}
 
     # ---- chat via Responses API ----------------------------------------------
 

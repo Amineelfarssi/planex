@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { View, SessionSummary, KBStats, PlanState, Task } from '../types'
+import type { HealthStatus } from '../api/client'
 
 interface AppState {
   theme: 'dark' | 'light'
@@ -29,6 +30,12 @@ interface AppState {
 
   docPanelOpen: boolean
   setDocPanelOpen: (open: boolean) => void
+
+  // Settings / provider status
+  providerStatus: HealthStatus | null
+  setProviderStatus: (s: HealthStatus | null) => void
+  settingsOpen: boolean
+  setSettingsOpen: (open: boolean) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -62,4 +69,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   docPanelOpen: false,
   setDocPanelOpen: (docPanelOpen) => set({ docPanelOpen }),
+
+  providerStatus: null,
+  setProviderStatus: (providerStatus) => set({ providerStatus }),
+  settingsOpen: false,
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 }))

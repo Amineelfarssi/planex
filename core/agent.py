@@ -12,21 +12,45 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
-
 from core.context import ContextManager
 from core.executor import Executor
 from core.knowledge import KnowledgeStore
-from core.llm import OpenAIProvider
+from core.llm import LLMProvider, OpenAIProvider
 from core.memory import MemoryManager
 from core.models import RewrittenQuery
 from core.planner import Planner
 from core.state import PlanState, StateManager, Task
 from tools.base import ToolRegistry
+
+
+def _create_llm_provider() -> LLMProvider:
+    """Pick LLM provider. Order:
+    1. Explicit PLANEX_PROVIDER env var (bedrock | openai)
+    2. If OPENAI_API_KEY is set → OpenAI
+    3. If running on AWS (SageMaker / EC2) → Bedrock
+    4. Fallback → OpenAI (will fail fast with a clear error if no key)
+    """
+    provider = os.environ.get("PLANEX_PROVIDER", "").lower()
+    if provider == "bedrock":
+        from core.llm_bedrock import BedrockAnthropicProvider
+        return BedrockAnthropicProvider()
+    if provider == "openai":
+        return OpenAIProvider()
+
+    # Auto-detect: API key present → OpenAI, AWS environment → Bedrock
+    if os.environ.get("OPENAI_API_KEY"):
+        return OpenAIProvider()
+    if os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION") or os.environ.get("SAGEMAKER_APP_TYPE"):
+        from core.llm_bedrock import BedrockAnthropicProvider
+        return BedrockAnthropicProvider()
+
+    return OpenAIProvider()
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +73,7 @@ class Agent:
     """Main Planex agent — orchestrates all paths."""
 
     def __init__(self) -> None:
-        self.llm = OpenAIProvider()
+        self.llm = _create_llm_provider()
         self.knowledge = KnowledgeStore(self.llm)
         self.memory = MemoryManager(self.llm)
         self.state = StateManager()
@@ -268,9 +292,9 @@ class Agent:
                     yield AgentEvent("tool_end", {"toolCallId": tool_call_id})
                     yield AgentEvent("tool_result", {"toolCallId": tool_call_id, "content": tool_output[:500]})
 
-                    # Append in Responses API format
-                    messages.append({"type": "function_call", "call_id": tool_call_id, "name": tc.name, "arguments": json.dumps(tc.arguments)})
-                    messages.append({"type": "function_call_output", "call_id": tool_call_id, "output": tool_output})
+                    # Append in provider-native format
+                    messages.append(self.llm.format_tool_call(tool_call_id, tc.name, tc.arguments))
+                    messages.append(self.llm.format_tool_result(tool_call_id, tool_output))
 
                 continue  # loop — LLM sees tool results
 
