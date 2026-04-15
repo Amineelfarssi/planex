@@ -18,7 +18,7 @@ dependencies = [
     "click>=8.1",
     "pyarrow>=18.0",
     "ag-ui-protocol>=0.1",
-    "duckduckgo-search>=7.0",
+    "ddgs>=9.0",
 ]
 
 [project.optional-dependencies]
