@@ -94,13 +94,10 @@ class Agent:
     # ------------------------------------------------------------------
 
     async def plan(self, goal: str) -> PlanState:
-        import time as _time
-        t0 = _time.time()
         self.memory.load_memory()
-        print(f"[TIMING] load_memory: {_time.time() - t0:.2f}s")
-        t1 = _time.time()
-        await self.knowledge.scan_sources_dir()
-        print(f"[TIMING] scan_sources_dir: {_time.time() - t1:.2f}s")
+        # Source ingestion is explicit (upload, CLI ingest, drag-drop).
+        # No automatic scan_sources_dir() — it walked the directory,
+        # hashed every file, and queried LanceDB on every agent restart.
         return await self.planner.create_plan(goal)
 
     async def execute(
@@ -109,7 +106,7 @@ class Agent:
         on_task_update: Callable[[Task, str], None] | None = None,
     ) -> str:
         synthesis = await self.executor.execute_plan(plan, on_task_update)
-        await self._post_session(plan, synthesis)
+        asyncio.create_task(self._post_session(plan, synthesis))
         return synthesis
 
     async def run(self, goal: str, on_task_update=None) -> tuple[PlanState, str]:
@@ -317,35 +314,10 @@ class Agent:
 
         yield AgentEvent("text_done", {"full": full_response})
 
-        # Step 5: Post-processing (same as execute() path)
+        # Step 5: Save chat history
         if plan:
             self.state.add_chat_message(plan, "user", user_message)
             self.state.add_chat_message(plan, "assistant", full_response)
-
-            # Extract learnings from substantial responses
-            if len(full_response) > 500:
-                try:
-                    extracts = await self.memory._extract_learnings(
-                        plan.goal, full_response
-                    )
-                    if extracts:
-                        plan.memory_extracts.extend(extracts)
-                        self.state.save(plan)
-                except Exception:
-                    pass
-
-                # Auto-ingest into KB if it's substantial research
-                if used_tools and len(full_response) > 300:
-                    try:
-                        await self.knowledge.ingest_text(
-                            text=full_response,
-                            source=f"followup:{plan.plan_id}",
-                            source_type="session_synthesis",
-                            ingested_by=f"session:{plan.plan_id}",
-                            title=f"Follow-up: {user_message[:50]}",
-                        )
-                    except Exception:
-                        pass
 
         elapsed = time.time() - start_time
         total_tokens = sum(u.total for u in self.llm.total_usage.values()) if self.llm.total_usage else 0

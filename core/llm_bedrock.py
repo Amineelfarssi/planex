@@ -67,7 +67,7 @@ def _tier_default(tier: str) -> str:
 _TIER_THINKING_BUDGET = {
     "fast": 0,
     "smart": 0,
-    "strategic": 5000,
+    "strategic": 2000,
 }
 
 MAX_RETRIES = 3

@@ -121,8 +121,7 @@ class Executor:
             # Build context for this task
             tool_descriptions = self._tools.get_tools_description()
             knowledge_context = ""
-            if task.tool_hint != "knowledge_search":
-                # Pre-fetch relevant knowledge for non-KB tasks
+            if task.tool_hint != "knowledge_search" and self._kb.get_stats().get("chunks", 0) > 0:
                 try:
                     kb_results = await self._kb.search(task.title, top_k=3, use_rag_fusion=False)
                     if kb_results:
@@ -162,19 +161,6 @@ class Executor:
 
                     if result.success:
                         all_results.append(result.data)
-
-                        # Auto-ingest web content into KB
-                        if tc.name in ("read_url", "ddg_search") and len(result.data) > 100:
-                            try:
-                                await self._kb.ingest_text(
-                                    text=result.data,
-                                    source=result.metadata.get("url", f"web:{tc.name}"),
-                                    source_type="web_page",
-                                    ingested_by=f"session:{plan.plan_id}",
-                                    title=result.metadata.get("title", task.title[:50]),
-                                )
-                            except Exception:
-                                pass
                     else:
                         all_results.append(f"[Failed: {result.data[:100]}]")
 

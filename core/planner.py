@@ -114,9 +114,6 @@ class Planner:
 
     async def create_plan(self, goal: str) -> PlanState:
         """Generate a structured plan from a user goal."""
-        import time as _time
-
-        t0 = _time.time()
         kb_stats = self._kb.get_stats()
 
         if kb_stats['chunks'] > 0:
@@ -132,42 +129,30 @@ class Planner:
                 "Do NOT create knowledge_search tasks. Use ddg_search + read_url instead."
             )
 
-        t1 = _time.time()
-        print(f"[TIMING] kb_stats: {t1 - t0:.2f}s")
-
-        # Extract topic via LLM (not hacky string splitting)
-        topic = await self._extract_topic(goal)
-        t2 = _time.time()
-        print(f"[TIMING] extract_topic (fast LLM): {t2 - t1:.2f}s")
-
         system = PLANNER_SYSTEM.format(
             tools_with_status=self._get_tools_with_status(),
             kb_status=kb_status,
         )
 
+        # Single LLM call — no separate topic extraction (Opus can infer the topic)
         try:
             plan: ResearchPlan = await self._llm.chat_parse(
                 messages=[
                     {"role": "system", "content": system},
-                    {"role": "user", "content": f"Create a research plan for: {goal}\n\nThe core topic is: {topic}"},
+                    {"role": "user", "content": f"Create a research plan for: {goal}"},
                 ],
                 response_model=ResearchPlan,
                 tier="strategic",
             )
-            t3 = _time.time()
-            print(f"[TIMING] chat_parse strategic: {t3 - t2:.2f}s")
             tasks = [t.model_dump() for t in plan.tasks]
             plan_title = plan.plan_title
         except Exception as e:
-            t3 = _time.time()
-            print(f"[TIMING] chat_parse strategic FAILED after {t3 - t2:.2f}s: {e}")
             # Fallback: single-task plan using first available tool
             fallback_tool = next(iter(self._get_valid_tool_names()), "ddg_search")
-            tasks = [{"id": "t1", "title": f"Research: {topic}", "description": goal, "tool_hint": fallback_tool, "depends_on": []}]
-            plan_title = f"Research: {topic}"
+            tasks = [{"id": "t1", "title": f"Research: {goal[:60]}", "description": goal, "tool_hint": fallback_tool, "depends_on": []}]
+            plan_title = f"Research: {goal[:60]}"
 
         # Validate: fix bad tool hints, duplicate IDs, broken deps
         tasks = self._validate_plan(tasks)
-        print(f"[TIMING] total create_plan: {_time.time() - t0:.2f}s")
 
         return self._state.create_plan(goal, plan_title, tasks)
